@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { createStore } from "../lib/store";
-import { setPinned } from "../platform/native";
+import { isNative, setPinned } from "../platform/native";
 import { hoverDelayMs, settings } from "../settings/store";
 import { closeDelayMs } from "../features/window/model";
 
@@ -84,6 +85,7 @@ export function useNotchState() {
     statusRef.current = s;
     setStatusState(s);
     if (notchOpen.get() !== (s === "open")) notchOpen.set(s === "open");
+    if (isNative) void invoke("notch_set_expanded", { expanded: s === "open" }).catch(() => {});
   }, []);
 
   const later = useCallback(

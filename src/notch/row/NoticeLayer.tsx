@@ -12,7 +12,7 @@ import { settings } from "../../settings/store";
 import { ringing, timer, timerActions, useSecondTick } from "../../features/timer/store";
 import { usage } from "../../features/usage/store";
 import { statusAlert } from "../../features/status/store";
-import { windowLabel } from "../../features/usage/UsageView";
+import { windowLabel } from "../../features/usage/labels";
 import { dueTasks } from "../../features/todos/store";
 import { reminderNotice } from "../../features/todos/ReminderNotice";
 import { waterDue } from "../../features/water/store";

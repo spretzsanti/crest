@@ -298,6 +298,7 @@ pub fn run() {
             display::display_fullscreen,
             display::display_raise,
             display::display_apps,
+            display::notch_set_expanded,
             #[cfg(windows)]
             mirror::display_cursor_monitor,
             #[cfg(windows)]

@@ -25,23 +25,9 @@ import { usePresenting } from "../privacy/store";
 /** What a stale card adds: its reason on up to two lines and the renew link. */
 const STALE_ROWS = 56;
 
-const windowLabels: Record<string, string> = {
-  session: "Session",
-  weekly: "Woche",
-  "weekly-opus": "Woche · Opus",
-  "weekly-sonnet": "Woche · Sonnet",
-  "session-3p": "Session · Claude/GPT",
-  "weekly-3p": "Woche · Claude/GPT",
-  daily: "Heute",
-  monthly: "Monat",
-  "key-limit": "Schlüssellimit",
-  "monthly-tools": "Tool-Aufrufe im Monat",
-};
+import { windowLabel, windowLabels } from "./labels";
+export { windowLabel, windowLabels };
 
-/** The limit window's name, translated ("model:Opus" is just "Opus"). */
-export function windowLabel(kind: string): string {
-  return kind.startsWith("model:") ? kind.slice(6) : t(windowLabels[kind] ?? kind);
-}
 
 export const usageError: Record<string, string> = {
   "not-found": "Nicht auf diesem Gerät gefunden",

@@ -17,8 +17,8 @@
         "label": "notch",
         "create": false,
         "title": "Crest",
-        "width": 760,
-        "height": 560,
+        "width": 300,
+        "height": 44,
         "x": 0,
         "y": 0,
         "transparent": true,
@@ -32,7 +32,7 @@
         "visible": false,
         "focus": false,
         "dragDropEnabled": false,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,msEdgeTranslate,SpareRendererForSitePerProcess,OptimizationHints,MediaRouter,AutofillServerCommunication --disable-background-networking --disable-component-update --disable-sync --no-pings --renderer-process-limit=1"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,msEdgeTranslate,SpareRendererForSitePerProcess,OptimizationHints,MediaRouter,AutofillServerCommunication,AudioServiceOutOfProcess --skia-resource-cache-limit-mb=16 --skia-font-cache-limit-mb=4 --disable-gpu-shader-disk-cache --renderer-process-limit=1 --js-flags=\"--lite-mode --optimize-for-size\""
       },
       {
         "label": "mirror",
@@ -40,8 +40,8 @@
         "url": "mirror.html",
         "title": "Crest",
         "focusable": false,
-        "width": 760,
-        "height": 560,
+        "width": 300,
+        "height": 44,
         "transparent": true,
         "decorations": false,
         "shadow": false,
@@ -53,7 +53,7 @@
         "visible": false,
         "focus": false,
         "dragDropEnabled": false,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,msEdgeTranslate,SpareRendererForSitePerProcess,OptimizationHints,MediaRouter,AutofillServerCommunication --disable-background-networking --disable-component-update --disable-sync --no-pings --renderer-process-limit=1"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,msEdgeTranslate,SpareRendererForSitePerProcess,OptimizationHints,MediaRouter,AutofillServerCommunication,AudioServiceOutOfProcess --skia-resource-cache-limit-mb=16 --skia-font-cache-limit-mb=4 --disable-gpu-shader-disk-cache --renderer-process-limit=1 --js-flags=\"--lite-mode --optimize-for-size\""
       },
       {
         "label": "timer",
@@ -74,7 +74,7 @@
         "visible": false,
         "focus": false,
         "dragDropEnabled": false,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,msEdgeTranslate,SpareRendererForSitePerProcess,OptimizationHints,MediaRouter,AutofillServerCommunication --disable-background-networking --disable-component-update --disable-sync --no-pings --renderer-process-limit=1"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,msEdgeTranslate,SpareRendererForSitePerProcess,OptimizationHints,MediaRouter,AutofillServerCommunication,AudioServiceOutOfProcess --skia-resource-cache-limit-mb=16 --skia-font-cache-limit-mb=4 --disable-gpu-shader-disk-cache --renderer-process-limit=1 --js-flags=\"--lite-mode --optimize-for-size\""
       }
     ],
     "security": {

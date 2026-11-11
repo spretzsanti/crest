@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import { lazy, Suspense, createElement, type ComponentType } from "react";
 import {
   ArrowsLeftRight,
   BellSimple,
@@ -25,57 +25,70 @@ import {
   Tray,
   Vault,
   TerminalWindow,
+  Camera,
+  VideoCamera,
+  Waveform,
+  CalendarCheck,
+  Eyedropper,
+  GlobeHemisphereWest,
+  Scroll,
+  Robot,
   type Icon,
 } from "@phosphor-icons/react";
 import { DepotIcon } from "../ui/icons";
 import type { Hue } from "../features/themes/hues";
 import { DiscordLogo } from "../ui/brands";
-import { OverviewView } from "../features/overview/OverviewView";
-import { NowPlayingView } from "../features/now-playing/NowPlayingView";
-import { TimerView } from "../features/timer/TimerView";
-import { TodosView } from "../features/todos/TodosView";
-import { NotesView } from "../features/notes/NotesView";
-import { ClipboardView } from "../features/clipboard/ClipboardView";
-import { ShelfView } from "../features/shelf/ShelfView";
-import { AskView } from "../features/ask/AskView";
-import { ConvertView } from "../features/convert/ConvertView";
-import { TradingView } from "../features/trading/TradingView";
-import { UsageView } from "../features/usage/UsageView";
-import { WeatherView } from "../features/weather/WeatherView";
-import { SystemView } from "../features/system/SystemView";
-import { DiscordView } from "../features/discord/DiscordView";
-import { VaultView } from "../features/vault/VaultView";
-import { WaterView } from "../features/water/WaterView";
-import { ScratchpadView } from "../features/scratchpad/ScratchpadView";
 import { QUOTE_LINE_H } from "../features/quotes/QuoteLine";
 import { SEARCH_LINE_H } from "../features/overview/SearchLine";
 import { settings } from "../settings/store";
-import { NoticesView } from "../features/notices/NoticesView";
-import { SettingsView } from "../features/settings/SettingsView";
-import { TerminalView } from "../features/terminal/TerminalView";
-import { LauncherView } from "../features/launcher/LauncherView";
-import { GithubView } from "../features/github/GithubView";
-import { CalendarView } from "../features/calendar/CalendarView";
-import { CaptureView } from "../features/capture/CaptureView";
-import { SetupView } from "../features/setup/SetupView";
-import { WhatsNewView } from "../features/whatsnew/WhatsNewView";
-import { Camera, VideoCamera, Waveform } from "@phosphor-icons/react";
-import { RecorderView } from "../features/recorder/RecorderView";
-import { CameraView } from "../features/camera/CameraView";
-import { FindView } from "../features/find/FindView";
-import { CalendarCheck } from "@phosphor-icons/react";
-import { HabitsView } from "../features/habits/HabitsView";
-import { ColourView } from "../features/colour/ColourView";
-import { Eyedropper } from "@phosphor-icons/react";
-import { GlobeHemisphereWest } from "@phosphor-icons/react";
-import { ClocksView } from "../features/clocks/ClocksView";
-import { Scroll } from "@phosphor-icons/react";
-import { TeleprompterView } from "../features/teleprompter/TeleprompterView";
-import { Robot } from "@phosphor-icons/react";
-import { AgentsView } from "../features/agents/AgentsView";
-import { CalcView } from "../features/calc/CalcView";
 import { pluginTab } from "../features/plugins/tabs";
 import { isMac } from "../platform/native";
+
+function lazyView(loader: () => Promise<any>, exportName: string): ComponentType {
+  const LazyComp = lazy(async () => {
+    const mod = await loader();
+    return { default: mod[exportName] || mod.default };
+  });
+  return function LazyWrapper(props: any) {
+    return createElement(Suspense, { fallback: null }, createElement(LazyComp, props));
+  };
+}
+
+const OverviewView = lazyView(() => import("../features/overview/OverviewView"), "OverviewView");
+const NowPlayingView = lazyView(() => import("../features/now-playing/NowPlayingView"), "NowPlayingView");
+const TimerView = lazyView(() => import("../features/timer/TimerView"), "TimerView");
+const TodosView = lazyView(() => import("../features/todos/TodosView"), "TodosView");
+const NotesView = lazyView(() => import("../features/notes/NotesView"), "NotesView");
+const ClipboardView = lazyView(() => import("../features/clipboard/ClipboardView"), "ClipboardView");
+const ShelfView = lazyView(() => import("../features/shelf/ShelfView"), "ShelfView");
+const AskView = lazyView(() => import("../features/ask/AskView"), "AskView");
+const ConvertView = lazyView(() => import("../features/convert/ConvertView"), "ConvertView");
+const TradingView = lazyView(() => import("../features/trading/TradingView"), "TradingView");
+const UsageView = lazyView(() => import("../features/usage/UsageView"), "UsageView");
+const WeatherView = lazyView(() => import("../features/weather/WeatherView"), "WeatherView");
+const SystemView = lazyView(() => import("../features/system/SystemView"), "SystemView");
+const DiscordView = lazyView(() => import("../features/discord/DiscordView"), "DiscordView");
+const VaultView = lazyView(() => import("../features/vault/VaultView"), "VaultView");
+const WaterView = lazyView(() => import("../features/water/WaterView"), "WaterView");
+const ScratchpadView = lazyView(() => import("../features/scratchpad/ScratchpadView"), "ScratchpadView");
+const TerminalView = lazyView(() => import("../features/terminal/TerminalView"), "TerminalView");
+const LauncherView = lazyView(() => import("../features/launcher/LauncherView"), "LauncherView");
+const GithubView = lazyView(() => import("../features/github/GithubView"), "GithubView");
+const CalendarView = lazyView(() => import("../features/calendar/CalendarView"), "CalendarView");
+const NoticesView = lazyView(() => import("../features/notices/NoticesView"), "NoticesView");
+const CaptureView = lazyView(() => import("../features/capture/CaptureView"), "CaptureView");
+const RecorderView = lazyView(() => import("../features/recorder/RecorderView"), "RecorderView");
+const CameraView = lazyView(() => import("../features/camera/CameraView"), "CameraView");
+const HabitsView = lazyView(() => import("../features/habits/HabitsView"), "HabitsView");
+const ColourView = lazyView(() => import("../features/colour/ColourView"), "ColourView");
+const ClocksView = lazyView(() => import("../features/clocks/ClocksView"), "ClocksView");
+const TeleprompterView = lazyView(() => import("../features/teleprompter/TeleprompterView"), "TeleprompterView");
+const AgentsView = lazyView(() => import("../features/agents/AgentsView"), "AgentsView");
+const CalcView = lazyView(() => import("../features/calc/CalcView"), "CalcView");
+const SettingsView = lazyView(() => import("../features/settings/SettingsView"), "SettingsView");
+const SetupView = lazyView(() => import("../features/setup/SetupView"), "SetupView");
+const WhatsNewView = lazyView(() => import("../features/whatsnew/WhatsNewView"), "WhatsNewView");
+const FindView = lazyView(() => import("../features/find/FindView"), "FindView");
 
 /** Tools built on Windows APIs with no Mac version yet (src-tauri/src/macos/); a Mac doesn't list them. */
 const WINDOWS_ONLY = new Set(["shelf", "system", "discord", "vault", "terminal", "launcher", "notices", "capture", "recorder", "camera"]);

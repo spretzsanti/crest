@@ -1,7 +1,10 @@
 import { MicrophoneSlash, SpeakerSimpleSlash } from "@phosphor-icons/react";
 import type { DiscordCall } from "../../../platform/services";
 import { Equalizer } from "../../../features/now-playing/Equalizer";
-import { GuildIcon } from "../../../features/discord/DiscordView";
+import { GuildIcon } from "../../../features/discord/GuildIcon";
+
+
+
 
 /** Server icon, gap, and a 16 px box for the state. */
 export const DISCORD_WIDTH = 20 + 4 + 16;

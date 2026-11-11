@@ -20,13 +20,13 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 import { fade, springs } from "../../design/motion";
-import { createStore } from "../../lib/store";
 import { formatBytes } from "../../lib/format";
 import { draggingOut, drop, pasteFiles, takeDropped, usePasteFiles } from "../../platform/drop";
 import { HeaderActions, HeaderButton } from "../../notch/header";
 import { holdOpen } from "../../notch/useNotchState";
 import { clipboardText, copyFiles, filePreview, openFile, onPhoneShareLost, phoneShareStart, phoneShareStop, probeFiles, revealFile, shelfDragOut, type FileKind, type PhoneShare } from "../../platform/services";
-import { addFiles, addText, dragPayload, isText, keyOf, normalizeItems, removeKeys, type FileItem, type ShelfItem, type TextItem } from "./model";
+import { addText, dragPayload, isText, keyOf, removeKeys, type FileItem, type TextItem } from "./model";
+
 import { NONE, clickSelect, dragKeys, prune, type Selection } from "./selection";
 import { lang, t, tBackend } from "../../i18n";
 import { usePresenting } from "../privacy/store";
@@ -49,16 +49,13 @@ import { Redacted } from "../../ui/controls";
  * until it is stopped, the shelf closes or ten minutes pass (phone_share.rs). The notch stays
  * open meanwhile, so the link does not vanish while the phone is out.
  */
-const shelf = createStore<ShelfItem[]>([], { persist: "shelf" });
-shelf.set(normalizeItems);
+import { shelf, addToShelf } from "./store";
+export { addToShelf, shelf };
 
 /** Movement in px before a press on a card becomes a drag. */
 const DRAG_START = 6;
 
-/** Puts files at the front of the Shelf (also used by Capture for new screenshots). */
-export function addToShelf(paths: string[]) {
-  void probeFiles(paths).then(({ files }) => shelf.set((list) => addFiles(list, files, Date.now())));
-}
+
 
 /** Thumbnails by file and size: the shelf is rebuilt on every opening, decoding a photo each time is slow. */
 const previews = new Map<string, Promise<string | null>>();

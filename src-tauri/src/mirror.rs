@@ -226,7 +226,7 @@ fn sync(app: &AppHandle, mirrors: &mut Vec<Mirror>) {
             m.zoom = config.zoom;
         }
         m.monitor = spot.monitor.clone();
-        let _ = display::put(&m.window, Some(&spot.monitor), &config, spot.line, spot.y);
+        let _ = display::put(&m.window, Some(&spot.monitor), &config, spot.line, spot.y, false);
         let on = m.window.hwnd().map(|h| unsafe { MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) }.0 as isize).unwrap_or(0);
         let show = !hidden && !blocked.contains(&on);
         if show != m.shown {

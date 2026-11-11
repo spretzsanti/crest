@@ -2,7 +2,7 @@ import { CheckCircle, FolderOpen, Tray } from "@phosphor-icons/react";
 import { NOTICE_BUTTON as BUTTON, NoticeButton } from "../../notch/row/NoticeButton";
 import { noticeCard } from "../../notch/row/NoticeCard";
 import { revealFile, type DownloadFinished } from "../../platform/services";
-import { addToShelf } from "../shelf/ShelfView";
+import { addToShelf } from "../shelf/store";
 import { t } from "../../i18n";
 import { settings } from "../../settings/store";
 import { dismissDownload } from "./store";

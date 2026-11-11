@@ -72,6 +72,8 @@ pub struct DisplayState {
     behavior: AtomicU8,
     /// An app covers the notch's monitor in fullscreen right now, for `display_fullscreen`.
     fullscreen: AtomicBool,
+    /// Whether the notch is currently expanded (open, peek, or omni) or closed/line.
+    pub(crate) expanded: AtomicBool,
     /// The monitors (HMONITOR) of other screens where a window calls for hiding or the line, so their mirrors hide.
     pub(crate) mirror_block: Mutex<Vec<isize>>,
 }
@@ -152,6 +154,9 @@ fn fit_zoom(z: f64) -> f64 {
 const ALONG: f64 = 760.0;
 const DEPTH: f64 = 560.0;
 const SIDE_DEPTH: f64 = 760.0;
+/// Dynamic viewport: closed capsule bounds (~300x44 px) to shrink HWND DirectComposition framebuffer when not expanded.
+const CLOSED_ALONG: f64 = 300.0;
+const CLOSED_DEPTH: f64 = 44.0;
 /// The longest window along the edge: the widest closed notch the settings allow (8000) and the room around it.
 const MAX_ALONG: f64 = 8060.0;
 
@@ -392,11 +397,19 @@ fn sync(app: &AppHandle) {
     }
 }
 
+/// Dynamically resizes and repositions the notch window HWND based on expanded state.
+#[tauri::command]
+pub fn notch_set_expanded(expanded: bool, window: WebviewWindow, state: State<'_, DisplayState>) -> tauri::Result<()> {
+    state.expanded.store(expanded, Ordering::Relaxed);
+    place(&window, &state)?;
+    Ok(())
+}
+
 /// Centered on the chosen monitor (primary otherwise), `y` CSS px below its top edge (clamped to the monitor).
 /// Off the top edge the window's own edge goes on `line`, centred along that edge, and on a side edge it is as deep as long.
 pub fn place(window: &WebviewWindow, state: &DisplayState) -> tauri::Result<()> {
     let c = state.config();
-    put(window, c.monitor.as_deref(), &c, c.line, c.y)
+    put(window, c.monitor.as_deref(), &c, c.line, c.y, state.expanded.load(Ordering::Relaxed))
 }
 
 impl DisplayState {
@@ -406,7 +419,7 @@ impl DisplayState {
 }
 
 /// `place` for any window: on `wanted` (the primary monitor when it is missing), with `line` and `y` for that monitor and the rest of `c`.
-pub(crate) fn put(window: &WebviewWindow, wanted: Option<&str>, c: &Config, line: f64, y: f64) -> tauri::Result<()> {
+pub(crate) fn put(window: &WebviewWindow, wanted: Option<&str>, c: &Config, line: f64, y: f64, expanded: bool) -> tauri::Result<()> {
     let (offset, zoom, edge, along) = (c.offset, c.zoom, c.edge.as_str(), fit_along(c.along));
     let side = edge == "left" || edge == "right";
     let monitor = wanted
@@ -417,15 +430,19 @@ pub(crate) fn put(window: &WebviewWindow, wanted: Option<&str>, c: &Config, line
     // only updates after the first move.
     for _ in 0..2 {
         let mut size = window.outer_size()?;
-        // Only resized when the orientation, the zoom or the closed notch's length changes, so the top edge at 100 % keeps its window as it was.
-        let (lw, lh) = (if side { SIDE_DEPTH } else { along } * zoom, if side { along } else { DEPTH } * zoom);
+        // Dynamic viewport: 760x560 when expanded (open/peek), 300x44 when closed/line
+        let (lw, lh) = if expanded {
+            (if side { SIDE_DEPTH } else { along } * zoom, if side { along } else { DEPTH } * zoom)
+        } else {
+            (if side { CLOSED_DEPTH } else { CLOSED_ALONG } * zoom, if side { CLOSED_ALONG } else { CLOSED_DEPTH } * zoom)
+        };
         let dpi = window.scale_factor()?;
         if (size.width as f64 - lw * dpi).abs() > 2.0 || (size.height as f64 - lh * dpi).abs() > 2.0 {
             window.set_size(LogicalSize::new(lw, lh))?;
             size = window.outer_size()?;
         }
         let monitor_px = (monitor.size().width as i32, monitor.size().height as i32);
-        let at = Placement { edge, offset, y, line, keep: kept_along(along), scale: monitor.scale_factor() * zoom };
+        let at = Placement { edge, offset, y, line, keep: kept_along(if expanded { along } else { CLOSED_ALONG }), scale: monitor.scale_factor() * zoom };
         let (x, top) = at.position(monitor_px, (size.width as i32, size.height as i32));
         window.set_position(PhysicalPosition::new(monitor.position().x + x, monitor.position().y + top))?;
     }

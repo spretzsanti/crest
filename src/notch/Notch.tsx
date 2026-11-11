@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, animate, frame, motion, useMotionValue, useTransform, type MotionValue, type Transition } from "motion/react";
 import { GearSix, PushPin } from "@phosphor-icons/react";
 import { content, springs } from "../design/motion";
@@ -54,8 +55,8 @@ const RESUME_MS = 60_000;
 const NOOP = () => {};
 /** A part seen under the pointer this recently still decides the tool a hover opens (natively the page may miss the pointer leaving). */
 const POINTED_MS = 1500;
-/** Closed this long → lower WebView2's memory target. */
-const MEMORY_LOW_AFTER_MS = 20_000;
+/** Closed this long → lower WebView2's memory target (aggressive 2.5s purging for low memory). */
+const MEMORY_LOW_AFTER_MS = 2_500;
 /** After a drag ends without files, the native drop's paths may still be on their way for this long. */
 const DROP_WAIT_MS = 500;
 
@@ -322,6 +323,7 @@ export function Notch() {
     if (status === "closed") keyboardFocus(false);
     // A day/night change missed in sleep or across a clock shift shows up on the next open.
     if (status === "open") refreshTheme();
+    if (isNative) void invoke("notch_set_expanded", { expanded: status === "open" }).catch(() => {});
   }, [status]);
 
   // Closed for a while → WebView2 may trim memory; back to normal on the first touch
