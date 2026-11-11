@@ -1751,3 +1751,99 @@ export const capture = {
     return () => void off.then((f) => f());
   },
 };
+
+// ---------- OmniSearch ----------
+
+export interface OmniResult {
+  id: string;
+  title: string;
+  subtitle: string;
+  category: "app" | "file" | "calc" | "pdf" | "action";
+  icon: string;
+  target: string;
+  score: number;
+  action_data?: string | null;
+}
+
+export const omnisearch = {
+  query: (query: string, prefix?: string | null): Promise<OmniResult[]> =>
+    isNative
+      ? invoke<OmniResult[]>("omnisearch_query", { query, prefix: prefix ?? null })
+      : Promise.resolve(mockOmniSearch(query, prefix)),
+  open: (target: string, action: string = "open"): Promise<void> =>
+    isNative ? invoke("omnisearch_open", { target, action }) : Promise.resolve(),
+  status: (): Promise<string> =>
+    isNative ? invoke<string>("omnisearch_index_status") : Promise.resolve("Browser mock active"),
+};
+
+function mockOmniSearch(query: string, prefix?: string | null): OmniResult[] {
+  const q = query.trim().toLowerCase();
+  const res: OmniResult[] = [];
+  if (!q) return res;
+
+  if (q.startsWith("t ") || prefix === "t") {
+    const text = q.replace(/^t\s*/, "");
+    return [
+      {
+        id: "mock_task",
+        title: `Crear Tarea: "${text}"`,
+        subtitle: "Presiona Enter para crear en Google Tasks / To-Dos",
+        category: "action",
+        icon: "task",
+        target: `action:task:${text}`,
+        score: 1000,
+        action_data: text,
+      },
+    ];
+  }
+
+  if (q.startsWith("c ") || prefix === "c") {
+    const text = q.replace(/^c\s*/, "");
+    return [
+      {
+        id: "mock_cal",
+        title: `Agendar Evento: "${text}"`,
+        subtitle: "Presiona Enter para agendar en Google Calendar",
+        category: "action",
+        icon: "calendar",
+        target: `action:calendar:${text}`,
+        score: 1000,
+        action_data: text,
+      },
+    ];
+  }
+
+  if (/^[\d\s+\-*/^%().,eEkmugnp]+$/.test(q) && /[+\-*/^%]/.test(q)) {
+    try {
+      const sanitized = q.replace(/pi/g, "Math.PI").replace(/e/g, "Math.E");
+      const val = Function(`"use strict"; return (${sanitized})`)();
+      if (typeof val === "number" && !isNaN(val)) {
+        res.push({
+          id: "calc_mock",
+          title: String(val),
+          subtitle: `= ${val} (Live Calculation)`,
+          category: "calc",
+          icon: "calc",
+          target: `calc:${val}`,
+          score: 2000,
+          action_data: String(val),
+        });
+      }
+    } catch {}
+  }
+
+  if (q.includes("elctrdig") || q.includes("electr")) {
+    res.push({
+      id: "mock_app_1",
+      title: "Electrónica Digital",
+      subtitle: "Apuntes y Software de Cátedra",
+      category: "app",
+      icon: "app",
+      target: "C:\\Facultad\\Electronica_Digital.exe",
+      score: 950,
+    });
+  }
+
+  return res;
+}
+

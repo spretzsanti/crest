@@ -62,6 +62,16 @@ export const noticeHover = createStore(false);
 /** The notch is open: the closed row and its notices (a break, say) are not on screen. */
 export const notchOpen = createStore(false);
 
+let globalClose: (() => void) | null = null;
+
+export function closeNotch() {
+  if (globalClose) {
+    globalClose();
+  } else {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  }
+}
+
 /**
  * Notch state machine:
  *
@@ -110,6 +120,13 @@ export function useNotchState() {
     pinned.set(false);
     setStatus("closed");
   }, [setStatus]);
+
+  useEffect(() => {
+    globalClose = close;
+    return () => {
+      globalClose = null;
+    };
+  }, [close]);
 
   const dismiss = useCallback(() => {
     // Held (dragging, Windows Hello dialog in front) counts like pinned.

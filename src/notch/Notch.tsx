@@ -4,7 +4,7 @@ import { AnimatePresence, animate, frame, motion, useMotionValue, useTransform, 
 import { GearSix, PushPin } from "@phosphor-icons/react";
 import { content, springs } from "../design/motion";
 import { livePosition, useNowPlaying } from "../platform/media";
-import { isNative, keyboardFocus, onNativeBlur, onNativeHover, onNativeHoverAt, onShortcut, onTrayOpen, setHitRect, setMemoryLow } from "../platform/native";
+import { isNative, keyboardFocus, onNativeBlur, onNativeHover, onNativeHoverAt, onShortcut, onOmniShortcut, onOmniShelf, onOmniTask, onTrayOpen, setHitRect, setMemoryLow } from "../platform/native";
 import { PrivacyDots } from "../features/privacy/PrivacyDots";
 import { dragArea, edgeOf, useDragToMove, viewLine, windowLength, windowY } from "./drag";
 import { useLiveActivity } from "./live";
@@ -35,12 +35,13 @@ import { settings } from "../settings/store";
 import { useUnseen } from "../lib/changelog";
 import { nav, navigate, openOn, takeOpenTarget } from "./nav";
 import { update } from "../lib/update";
-import { findOnScreenTab, findTab, pageTabs, settingsTab, setupTab, tabs, type NotchTab } from "./tabs";
+import { findOnScreenTab, omniSearchTab, findTab, pageTabs, settingsTab, setupTab, tabs, type NotchTab } from "./tabs";
 import { scanScreens } from "../features/find/store";
 import { holdOpen, pinned, togglePin, useNotchState, visited, type NotchStatus } from "./useNotchState";
 import { t } from "../i18n";
 import { timer, useSecondTick } from "../features/timer/store";
-import { dueTasks } from "../features/todos/store";
+import { dueTasks, todoActions } from "../features/todos/store";
+import { addToShelf } from "../features/shelf/store";
 import { asks } from "../features/notices/store";
 import { refreshTheme, useClosedInk, useThemedAccent } from "../features/themes/store";
 import { useHue, type Hue } from "../features/themes/hues";
@@ -297,6 +298,54 @@ export function Notch() {
         keyboardFocus(true);
       }),
     [open, status, tab],
+  );
+
+  // OmniSearch: Alt+Space toggles OmniSearch command bar
+  useEffect(
+    () =>
+      onOmniShortcut(() => {
+        if (status === "open" && tab.id === omniSearchTab.id) {
+          close();
+        } else {
+          openOn(omniSearchTab.id);
+          keyboardFocus(true);
+        }
+      }),
+    [open, close, status, tab],
+  );
+
+  // In-app Alt+Space listener
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey && (e.code === "Space" || e.key === " ")) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (status === "open" && tab.id === omniSearchTab.id) {
+          close();
+        } else {
+          openOn(omniSearchTab.id);
+          keyboardFocus(true);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, close, status, tab]);
+
+  useEffect(
+    () =>
+      onOmniShelf((path) => {
+        addToShelf([path]);
+      }),
+    [],
+  );
+
+  useEffect(
+    () =>
+      onOmniTask((text) => {
+        todoActions.add(text);
+      }),
+    [],
   );
   // A tool's own shortcut: opens the notch on that tool, switches to it while open, and closes the notch when it already shows.
   useEffect(

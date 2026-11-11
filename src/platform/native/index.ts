@@ -3,10 +3,10 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 /** Is the frontend running in the Tauri app (rather than a regular browser)? */
-export const isNative = "__TAURI_INTERNALS__" in window;
+export const isNative = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /** The app on a Mac, where the tools built on Windows APIs are hidden (src/notch/tabs.ts). */
-export const isMac = isNative && navigator.userAgent.includes("Mac");
+export const isMac = isNative && typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
 /** Reports the hit zone in CSS px relative to the window to Rust (click-through). */
 export function setHitRect(rect: { x: number; y: number; w: number; h: number }) {
@@ -55,6 +55,27 @@ export function onNativeBlur(handler: () => void): () => void {
 export function onShortcut(handler: () => void): () => void {
   if (!isNative) return () => {};
   const off = listen("notch://shortcut", handler);
+  return () => void off.then((f) => f());
+}
+
+/** Global shortcut (Alt+Space) for OmniSearch was pressed. */
+export function onOmniShortcut(handler: () => void): () => void {
+  if (!isNative) return () => {};
+  const off = listen("notch://omnisearch", handler);
+  return () => void off.then((f) => f());
+}
+
+/** OmniSearch sent a file to the Shelf. */
+export function onOmniShelf(handler: (path: string) => void): () => void {
+  if (!isNative) return () => {};
+  const off = listen<string>("notch://omni-shelf", (e) => handler(e.payload));
+  return () => void off.then((f) => f());
+}
+
+/** OmniSearch created a task. */
+export function onOmniTask(handler: (text: string) => void): () => void {
+  if (!isNative) return () => {};
+  const off = listen<string>("notch://omni-task", (e) => handler(e.payload));
   return () => void off.then((f) => f());
 }
 

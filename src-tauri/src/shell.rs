@@ -40,6 +40,8 @@ struct Bound {
     find: Option<Shortcut>,
     /// The microphone mute (mic.rs).
     mic: Option<Shortcut>,
+    /// OmniSearch Alt+Space shortcut.
+    omnisearch: Option<Shortcut>,
     /// The tools' own shortcuts and the tool id each opens.
     tools: Vec<(Shortcut, String)>,
     /// The launcher's Alt+N keys and the app id each opens.
@@ -162,6 +164,9 @@ pub async fn hotkeys_apply(config: HotkeyConfig, app: AppHandle, state: State<'_
         let _ = item.set_text(label_text(&b.open_text, &b.open_label));
     }
     (b.open, b.hide, b.resize, b.find, b.mic, b.tools) = (open, hide, resize, find, mic, tools);
+    if b.omnisearch.is_none() {
+        let _ = bind(&app, "Alt+Space", &mut b.omnisearch);
+    }
     Ok(status)
 }
 
@@ -208,7 +213,7 @@ pub fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
         return;
     }
     let id = shortcut.id();
-    let (open, hide, resize, find, mic, tool, launch) = {
+    let (open, hide, resize, find, mic, omnisearch, tool, launch) = {
         let b = app.state::<Hotkeys>();
         let b = b.0.lock().unwrap();
         (
@@ -217,6 +222,7 @@ pub fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
             b.resize.iter().find(|(s, _)| s.id() == id).map(|(_, d)| *d),
             b.find.is_some_and(|s| s.id() == id),
             b.mic.is_some_and(|s| s.id() == id),
+            b.omnisearch.is_some_and(|s| s.id() == id),
             b.tools.iter().find(|(s, _)| s.id() == id).map(|(_, tool)| tool.clone()),
             b.launch.iter().find(|(s, _)| s.id() == id).map(|(_, app_id)| app_id.clone()),
         )
@@ -227,6 +233,9 @@ pub fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
         crate::launcher::launch_from_key(app, app_id);
         #[cfg(not(windows))]
         let _ = app_id;
+    } else if omnisearch {
+        display::unhide(app);
+        let _ = app.emit("notch://omnisearch", ());
     } else if open {
         display::unhide(app);
         let _ = app.emit("notch://shortcut", ());
@@ -287,9 +296,12 @@ pub fn init(app: &App) {
     // If another app owns the shortcut, Crest still runs, just without it.
     let mut open = None;
     let _ = bind(app.handle(), DEFAULT_OPEN, &mut open);
+    let mut omnisearch = None;
+    let _ = bind(app.handle(), "Alt+Space", &mut omnisearch);
     let state = app.state::<Hotkeys>();
     let mut b = state.0.lock().unwrap();
     b.open = open;
+    b.omnisearch = omnisearch;
     b.open_label = DEFAULT_OPEN.into();
 }
 

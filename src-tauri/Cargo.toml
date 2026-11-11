@@ -50,6 +50,7 @@ qrcodegen = "1.8"
 aes-gcm = "0.10"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+nucleo-matcher = "0.3.1"
 
 # macOS (src/macos/): Keychain for the API keys; AppKit for the window level above the menu bar, the frontmost app,
 # the pasteboard and the colour sampler (with block2 for its handler); a Foundation dictionary for the Accessibility

@@ -89,6 +89,7 @@ const SettingsView = lazyView(() => import("../features/settings/SettingsView"),
 const SetupView = lazyView(() => import("../features/setup/SetupView"), "SetupView");
 const WhatsNewView = lazyView(() => import("../features/whatsnew/WhatsNewView"), "WhatsNewView");
 const FindView = lazyView(() => import("../features/find/FindView"), "FindView");
+const OmniSearchView = lazyView(() => import("../features/omnisearch/OmniSearchView"), "OmniSearchView");
 
 /** Tools built on Windows APIs with no Mac version yet (src-tauri/src/macos/); a Mac doesn't list them. */
 const WINDOWS_ONLY = new Set(["shelf", "system", "discord", "vault", "terminal", "launcher", "notices", "capture", "recorder", "camera"]);
@@ -170,7 +171,10 @@ export const whatsNewTab: NotchTab = { id: "whatsnew", label: "Neuerungen", icon
 /** Find on screen: opened by its shortcut (Settings, Window), reads the screens with OCR (src/features/find/). */
 export const findOnScreenTab: NotchTab = { id: "find", label: "Auf dem Bildschirm suchen", icon: MagnifyingGlass, size: { w: 600, h: 320 }, View: FindView };
 
-export const pageTabs = [settingsTab, setupTab, whatsNewTab, findOnScreenTab];
+/** OmniSearch: Alt+Space command bar replacement for Flow Launcher. */
+export const omniSearchTab: NotchTab = { id: "omnisearch", label: "OmniSearch", icon: MagnifyingGlass, size: { w: 640, h: 440 }, View: OmniSearchView };
+
+export const pageTabs = [settingsTab, setupTab, whatsNewTab, findOnScreenTab, omniSearchTab];
 
 /** A built-in tool, a page, or an installed plugin (`plugin:<id>`). */
 export function findTab(id: string): NotchTab | undefined {

@@ -1,5 +1,6 @@
 mod agents;
 pub mod ai;
+pub mod omnisearch;
 #[cfg(windows)]
 mod audio;
 mod backup;
@@ -525,6 +526,9 @@ pub fn run() {
             agents::agents_list,
             mic::mic_mute,
             sharing::sharing_hide,
+            omnisearch::omnisearch_query,
+            omnisearch::omnisearch_open,
+            omnisearch::omnisearch_index_status,
             ];
             move |invoke| {
                 if !command_allowed(invoke.message.webview_ref().label(), invoke.message.command()) {
