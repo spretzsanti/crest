@@ -1053,6 +1053,66 @@ export function clipboardText(): Promise<string> {
   }
   return navigator.clipboard.readText().catch(() => "");
 }
+
+// ---------- Quick Send / Multi-Share ----------
+
+export interface LocalSendDevice {
+  id: string;
+  alias: string;
+  device_model: string | null;
+  device_type: "mobile" | "tablet" | "desktop" | string;
+  ip: string;
+  port: number;
+}
+
+export interface AdbDevice {
+  id: string;
+  model: string;
+  product: string | null;
+  status: string;
+}
+
+export function quickShareFiles(paths: string[]): Promise<void> {
+  if (isNative) return invoke("quick_share_files", { paths });
+  return Promise.resolve();
+}
+
+export function localsendDevices(): Promise<LocalSendDevice[]> {
+  if (isNative) return invoke<LocalSendDevice[]>("localsend_devices");
+  return Promise.resolve([]);
+}
+
+export function localsendSend(deviceIp: string, port: number, paths: string[]): Promise<void> {
+  if (isNative) return invoke("localsend_send", { deviceIp, port, paths });
+  return Promise.resolve();
+}
+
+export function adbDevices(): Promise<AdbDevice[]> {
+  if (isNative) return invoke<AdbDevice[]>("adb_devices");
+  return Promise.resolve([]);
+}
+
+export function adbPush(deviceId: string | null, paths: string[], targetDir?: string): Promise<string> {
+  if (isNative) return invoke<string>("adb_push", { deviceId, paths, targetDir });
+  return Promise.resolve("OK");
+}
+
+export function telegramShare(text: string | null, paths: string[]): Promise<string> {
+  if (isNative) return invoke<string>("telegram_share", { text, paths });
+  return Promise.resolve("");
+}
+
+export function onPhoneShareUploaded(handler: (data: { path: string; name: string }) => void): () => void {
+  if (!isNative) return () => {};
+  const off = listen<{ path: string; name: string }>("phone-share://uploaded", (e) => handler(e.payload));
+  return () => void off.then((f) => f());
+}
+
+export function onShelfAdd(handler: (path: string) => void): () => void {
+  if (!isNative) return () => {};
+  const off = listen<string>("notch://shelf-add", (e) => handler(e.payload));
+  return () => void off.then((f) => f());
+}
 // ---------- Terminal ----------
 
 /** Shell output as raw bytes; the last message of a session is its exit code. */

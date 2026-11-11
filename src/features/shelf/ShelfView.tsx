@@ -1,18 +1,25 @@
 import { useEffect, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
+  AndroidLogo,
   ArrowSquareOut,
   Check,
   CheckSquare,
+  CircleNotch,
   ClipboardText,
   Copy,
+  Desktop,
   DeviceMobile,
+  DeviceTablet,
   File,
   FileAudio,
   FileText,
   FileVideo,
   FolderOpen,
   ImageSquare,
+  PaperPlaneTilt,
+  QrCode,
+  ShareNetwork,
   Table,
   Trash,
   Tray,
@@ -24,7 +31,30 @@ import { formatBytes } from "../../lib/format";
 import { draggingOut, drop, pasteFiles, takeDropped, usePasteFiles } from "../../platform/drop";
 import { HeaderActions, HeaderButton } from "../../notch/header";
 import { holdOpen } from "../../notch/useNotchState";
-import { clipboardText, copyFiles, filePreview, openFile, onPhoneShareLost, phoneShareStart, phoneShareStop, probeFiles, revealFile, shelfDragOut, type FileKind, type PhoneShare } from "../../platform/services";
+import {
+  adbDevices,
+  adbPush,
+  clipboardText,
+  copyFiles,
+  filePreview,
+  localsendDevices,
+  localsendSend,
+  onPhoneShareLost,
+  onPhoneShareUploaded,
+  onShelfAdd,
+  openFile,
+  phoneShareStart,
+  phoneShareStop,
+  probeFiles,
+  quickShareFiles,
+  revealFile,
+  shelfDragOut,
+  telegramShare,
+  type AdbDevice,
+  type FileKind,
+  type LocalSendDevice,
+  type PhoneShare,
+} from "../../platform/services";
 import { addText, dragPayload, isText, keyOf, removeKeys, type FileItem, type TextItem } from "./model";
 
 import { NONE, clickSelect, dragKeys, prune, type Selection } from "./selection";
@@ -125,8 +155,44 @@ export function ShelfView() {
   const [rawSel, setSel] = useState<Selection>(NONE);
   const order = items.map(keyOf);
   const sel = prune(rawSel, order);
+  const picked = sel.keys.length;
   const press = useRef<{ x: number; y: number; key: string } | null>(null);
   const swallowClick = useRef(false);
+
+  const [localDevices, setLocalDevices] = useState<LocalSendDevice[]>([]);
+  const [adbDevs, setAdbDevs] = useState<AdbDevice[]>([]);
+  const [sendingState, setSendingState] = useState<Record<string, "sending" | "done" | "error">>({});
+
+  useEffect(() => {
+    let mounted = true;
+    const poll = () => {
+      void localsendDevices().then((devs) => {
+        if (mounted) setLocalDevices(devs);
+      }).catch(() => {});
+      void adbDevices().then((devs) => {
+        if (mounted) setAdbDevs(devs.filter((d) => d.status === "device"));
+      }).catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 4000);
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    const off1 = onShelfAdd((path) => {
+      addToShelf([path]);
+    });
+    const off2 = onPhoneShareUploaded(({ path }) => {
+      addToShelf([path]);
+    });
+    return () => {
+      off1();
+      off2();
+    };
+  }, []);
 
   usePasteFiles(() => void pasteTextFallback().then((ok) => !ok && flash(setNothing)));
 
@@ -166,7 +232,7 @@ export function ShelfView() {
 
   // Nothing shared is left on the shelf (cleared or removed): stop serving it.
   useEffect(() => {
-    if (share && !share.paths.some((p) => order.includes(p))) setShare(null);
+    if (share && share.paths.length > 0 && !share.paths.some((p) => order.includes(p))) setShare(null);
   }, [items]);
 
   // Items that left the shelf are forgotten, or putting one back would show it picked.
@@ -176,25 +242,94 @@ export function ShelfView() {
 
   const sendToPhone = (keys: string[]) => {
     const { paths } = dragPayload(items, keys);
-    if (!paths.length) return;
+    const n = paths.length;
+    const text = {
+      lang: lang(),
+      dir: document.documentElement.dir,
+      title: n ? t("Bereit zum Herunterladen") : "Compartir bidireccional",
+      count: n === 1 ? `1 ${t("Datei")}` : t("{n} Dateien", { n }),
+      hint: t("Tippe auf eine Datei, um sie zu speichern."),
+      footer: t("Direkt von deinem Computer über das WLAN, ohne Cloud."),
+    };
+    if (!paths.length) {
+      void phoneShareStart([], text)
+        .then((s) => setShare({ ...s, paths: [] }))
+        .catch((e: unknown) => fail(e, t("Senden fehlgeschlagen")));
+      return;
+    }
     // Only files that still exist are served, so only those are counted.
     void probeFiles(paths)
       .then(({ files }) => {
         const found = files.map((f) => f.path);
-        const n = found.length;
-        const text = {
-          lang: lang(),
-          dir: document.documentElement.dir,
-          title: t("Bereit zum Herunterladen"),
-          count: n === 1 ? `1 ${t("Datei")}` : t("{n} Dateien", { n }),
-          hint: t("Tippe auf eine Datei, um sie zu speichern."),
-          footer: t("Direkt von deinem Computer über das WLAN, ohne Cloud."),
-        };
         return phoneShareStart(found, text).then((s) => setShare({ ...s, paths: found }));
       })
       .catch((e: unknown) => fail(e, t("Senden fehlgeschlagen")));
   };
   const hasFiles = (keys: string[]) => dragPayload(items, keys).paths.length > 0;
+
+  const targetKeys = picked > 0 ? sel.keys : order;
+  const targetPayload = dragPayload(items, targetKeys);
+  const targetPaths = targetPayload.paths;
+
+  const handleQuickShare = async () => {
+    if (!targetPaths.length) return;
+    try {
+      await quickShareFiles(targetPaths);
+    } catch (e) {
+      fail(e, "Quick Share");
+    }
+  };
+
+  const handleLocalSend = async (dev: LocalSendDevice) => {
+    if (!targetPaths.length) return;
+    setSendingState((prev) => ({ ...prev, [dev.id]: "sending" }));
+    try {
+      await localsendSend(dev.ip, dev.port, targetPaths);
+      setSendingState((prev) => ({ ...prev, [dev.id]: "done" }));
+      setTimeout(() => setSendingState((prev) => {
+        const next = { ...prev };
+        delete next[dev.id];
+        return next;
+      }), 2500);
+    } catch (e) {
+      setSendingState((prev) => {
+        const next = { ...prev };
+        delete next[dev.id];
+        return next;
+      });
+      fail(e, `LocalSend (${dev.alias})`);
+    }
+  };
+
+  const handleAdbPush = async (deviceId: string) => {
+    if (!targetPaths.length) return;
+    const key = `adb-${deviceId}`;
+    setSendingState((prev) => ({ ...prev, [key]: "sending" }));
+    try {
+      await adbPush(deviceId, targetPaths, "/sdcard/Download/");
+      setSendingState((prev) => ({ ...prev, [key]: "done" }));
+      setTimeout(() => setSendingState((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }), 2500);
+    } catch (e) {
+      setSendingState((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      fail(e, "ADB Push");
+    }
+  };
+
+  const handleTelegramShare = async () => {
+    try {
+      await telegramShare(targetPayload.text, targetPaths);
+    } catch (e) {
+      fail(e, "Telegram");
+    }
+  };
 
   const flashCopied = (key: string) => {
     setCopied(key);
@@ -291,12 +426,18 @@ export function ShelfView() {
           <Tray size={22} weight="bold" className={over ? "text-label" : "text-label-3"} />
           <span className="text-body text-label-2">{over ? t("Loslassen zum Ablegen") : t("Dateien oder Text hierher ziehen")}</span>
           <PasteHint nothing={nothing} onPaste={() => void pasteAny().then((ok) => !ok && flash(setNothing))} />
+          <button
+            onClick={() => sendToPhone([])}
+            className="pressable mt-2 flex items-center gap-1.5 rounded-full bg-fill-2 px-3 py-1 text-caption text-label-2 hover:bg-fill-3 hover:text-label"
+          >
+            <QrCode size={13} weight="bold" style={{ color: HUE_PALETTE.amber[0] }} />
+            <span>Subir fotos desde el celular (QR)</span>
+          </button>
         </motion.div>
+        <AnimatePresence>{share && <PhonePanel share={share} onStop={() => setShare(null)} />}</AnimatePresence>
       </div>
     );
   }
-
-  const picked = sel.keys.length;
 
   return (
     <div className="relative flex h-full flex-col px-4 pt-1 pb-2" {...dropHandlers}>
@@ -342,6 +483,74 @@ export function ShelfView() {
           </>
         )}
       </HeaderActions>
+
+      {/* Target Quick Send Toolbar */}
+      <div className="mb-2 flex shrink-0 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] py-0.5">
+        <button
+          onClick={() => void handleQuickShare()}
+          disabled={!targetPaths.length}
+          className="pressable flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-fill-2 px-2.5 text-caption font-medium text-label hover:bg-fill-3 disabled:opacity-40"
+          title="Windows Quick Share / Google Nearby Share"
+        >
+          <ShareNetwork size={13} weight="bold" className="text-sky-400" />
+          <span>Quick Share</span>
+        </button>
+
+        {localDevices.map((dev) => (
+          <button
+            key={dev.id}
+            onClick={() => void handleLocalSend(dev)}
+            disabled={!targetPaths.length || sendingState[dev.id] === "sending"}
+            className="pressable flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-fill-2 px-2.5 text-caption font-medium text-label hover:bg-fill-3 disabled:opacity-40"
+            title={`LocalSend: ${dev.alias} (${dev.ip})`}
+          >
+            <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            {dev.device_type === "tablet" ? (
+              <DeviceTablet size={13} weight="bold" className="text-teal-400" />
+            ) : dev.device_type === "desktop" ? (
+              <Desktop size={13} weight="bold" className="text-indigo-400" />
+            ) : (
+              <DeviceMobile size={13} weight="bold" className="text-teal-400" />
+            )}
+            <span>{dev.alias}</span>
+            {sendingState[dev.id] === "sending" && <CircleNotch size={12} weight="bold" className="animate-spin text-label-2" />}
+            {sendingState[dev.id] === "done" && <Check size={12} weight="bold" className="text-emerald-400" />}
+          </button>
+        ))}
+
+        {adbDevs.map((dev) => (
+          <button
+            key={dev.id}
+            onClick={() => void handleAdbPush(dev.id)}
+            disabled={!targetPaths.length || sendingState[`adb-${dev.id}`] === "sending"}
+            className="pressable flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-fill-2 px-2.5 text-caption font-medium text-label hover:bg-fill-3 disabled:opacity-40"
+            title={`ADB Push a ${dev.model} en /sdcard/Download/`}
+          >
+            <AndroidLogo size={13} weight="bold" className="text-[#3ddc84]" />
+            <span>{`ADB: ${dev.model} → Descargas`}</span>
+            {sendingState[`adb-${dev.id}`] === "sending" && <CircleNotch size={12} weight="bold" className="animate-spin text-label-2" />}
+            {sendingState[`adb-${dev.id}`] === "done" && <Check size={12} weight="bold" className="text-emerald-400" />}
+          </button>
+        ))}
+
+        <button
+          onClick={() => sendToPhone(targetKeys)}
+          className="pressable flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-fill-2 px-2.5 text-caption font-medium text-label hover:bg-fill-3"
+          title="Abrir QR para descarga y subida bidireccional desde el celular"
+        >
+          <QrCode size={13} weight="bold" style={{ color: HUE_PALETTE.amber[0] }} />
+          <span>QR Celular</span>
+        </button>
+
+        <button
+          onClick={() => void handleTelegramShare()}
+          className="pressable flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-fill-2 px-2.5 text-caption font-medium text-label hover:bg-fill-3"
+          title="Mandar a mi Telegram"
+        >
+          <PaperPlaneTilt size={13} weight="bold" className="text-[#229ed9]" />
+          <span>Mandar a Telegram</span>
+        </button>
+      </div>
       <div role="listbox" aria-multiselectable="true" aria-label={t("Ablage")} className="flex min-h-0 flex-1 gap-2 overflow-x-auto [scrollbar-width:none]">
         <AnimatePresence initial={false} mode="popLayout">
           {items.map((item) => {
@@ -447,10 +656,16 @@ function PhonePanel({ share, onStop }: { share: PhoneShare & { paths: string[] }
         </svg>
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p className="text-body font-semibold text-label">{t("Mit dem Handy scannen")}</p>
-        <p className="text-caption text-label-2">{share.paths.length === 1 ? `1 ${t("Datei")}` : t("{n} Dateien", { n: share.paths.length })}</p>
+        <p className="text-body font-semibold text-label">Compartir bidireccional (PC ⇄ Celular)</p>
+        <p className="text-caption text-label-2">
+          {share.paths.length === 0
+            ? "Listo para recibir fotos o archivos del celular"
+            : share.paths.length === 1
+            ? "1 archivo listo para descargar o subir desde el celular"
+            : `${share.paths.length} archivos listos para descargar o subir`}
+        </p>
+        <p className="text-caption text-label-3">Escanea el QR con la cámara del celular. Abre la página para transferir archivos en ambas direcciones por Wi-Fi.</p>
         <p className="text-caption text-label-3">{t("Handy und Computer müssen im selben WLAN sein. Endet nach {n} Minuten.", { n: Math.round(share.ttl / 60) })}</p>
-        <p className="text-caption text-label-3">{t("Klappt es nicht? VPN, Firewall oder Gast-WLAN prüfen.")}</p>
         {!hidden && <p className="truncate text-caption text-label-3 tabular" title={share.url}>{share.url.replace(/^http:\/\//, "") || t("Nur in der App")}</p>}
         <button onClick={onStop} className="pressable mt-1 self-start rounded-full bg-fill-2 px-3 py-1 text-caption font-medium text-label hover:bg-fill-3">
           {t("Stopp")}

@@ -63,6 +63,7 @@ mod power;
 #[cfg(windows)]
 mod privacy;
 mod phone_share;
+pub mod quick_send;
 mod romanize;
 mod standby;
 mod translate;
@@ -529,6 +530,12 @@ pub fn run() {
             omnisearch::omnisearch_query,
             omnisearch::omnisearch_open,
             omnisearch::omnisearch_index_status,
+            quick_send::quick_share_files,
+            quick_send::localsend_devices,
+            quick_send::localsend_send,
+            quick_send::adb_devices,
+            quick_send::adb_push,
+            quick_send::telegram_share,
             ];
             move |invoke| {
                 if !command_allowed(invoke.message.webview_ref().label(), invoke.message.command()) {

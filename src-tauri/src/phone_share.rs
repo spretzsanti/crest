@@ -69,13 +69,15 @@ struct Share {
     text: PageText,
     /// The computer's name, above the title, so the phone says where the files come from.
     from: Option<String>,
+    app: Option<AppHandle>,
 }
 
 // async: is_file() on an unreachable network drive can stall for a long time, not on the main thread.
 #[tauri::command(async)]
 pub fn phone_share_start(paths: Vec<String>, text: PageText, app: AppHandle) -> Result<ShareInfo, String> {
+    let empty_requested = paths.is_empty();
     let files: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).filter(|p| p.is_file()).collect();
-    if files.is_empty() {
+    if !empty_requested && files.is_empty() {
         return Err("Dateien nicht mehr vorhanden".into());
     }
     let ip = lan_ip().ok_or("Kein lokales Netzwerk gefunden")?;
@@ -89,7 +91,13 @@ pub fn phone_share_start(paths: Vec<String>, text: PageText, app: AppHandle) -> 
     if let Some((_, old)) = CURRENT.lock().unwrap().replace((url.clone(), stop.clone())) {
         old.store(true, Ordering::Relaxed);
     }
-    let share = Share { token, files, text, from: std::env::var("COMPUTERNAME").ok().filter(|n| !n.is_empty()) };
+    let share = Share {
+        token,
+        files,
+        text,
+        from: std::env::var("COMPUTERNAME").ok().filter(|n| !n.is_empty()),
+        app: Some(app.clone()),
+    };
     let watched = stop.clone();
     let lost = url.clone();
     thread::spawn(move || serve(listener, share, stop, LIFETIME));
@@ -246,28 +254,160 @@ impl Read for Deadline<'_> {
     }
 }
 
+fn percent_decode(s: &str) -> String {
+    let mut bytes = Vec::new();
+    let mut chars = s.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            if let (Some(h1), Some(h2)) = (chars.next(), chars.next()) {
+                if let Ok(val) = u8::from_str_radix(&format!("{}{}", h1 as char, h2 as char), 16) {
+                    bytes.push(val);
+                    continue;
+                }
+            }
+        } else if b == b'+' {
+            bytes.push(b' ');
+        } else {
+            bytes.push(b);
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+fn sanitize_filename(name: &str) -> String {
+    let filename = std::path::Path::new(name).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "upload".into());
+    let clean: String = filename.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).collect();
+    if clean.is_empty() { "upload".into() } else { clean }
+}
+
+fn get_unique_path(dir: &std::path::Path, name: &str) -> PathBuf {
+    let clean = sanitize_filename(name);
+    let target = dir.join(&clean);
+    if !target.exists() {
+        return target;
+    }
+    let p = std::path::Path::new(&clean);
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext = p.extension().and_then(|e| e.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
+    for i in 1..10000 {
+        let candidate = dir.join(format!("{stem} ({i}){ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!("{stem}_{}{ext}", crate::now_ms()))
+}
+
+#[cfg(windows)]
+fn downloads_dir() -> PathBuf {
+    use windows::Win32::UI::Shell::{FOLDERID_Downloads, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
+    use windows::Win32::System::Com::CoTaskMemFree;
+    unsafe {
+        if let Ok(p) = SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, None) {
+            let dir = p.to_string().ok().map(PathBuf::from);
+            CoTaskMemFree(Some(p.0 as _));
+            if let Some(d) = dir {
+                return d;
+            }
+        }
+    }
+    std::env::var_os("USERPROFILE").map(PathBuf::from).map(|p| p.join("Downloads")).unwrap_or_else(std::env::temp_dir)
+}
+
+#[cfg(not(windows))]
+fn downloads_dir() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).map(|p| p.join("Downloads")).unwrap_or_else(std::env::temp_dir)
+}
+
+fn handle_upload(
+    stream: &mut TcpStream,
+    read_stream: &TcpStream,
+    buffered_bytes: &[u8],
+    query: &str,
+    share: &Share,
+    content_length: u64,
+) -> io::Result<()> {
+    let name = query
+        .split('&')
+        .find_map(|p| p.strip_prefix("name="))
+        .map(percent_decode)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("upload_{}.bin", crate::now_ms()));
+
+    let downloads = downloads_dir();
+    let _ = std::fs::create_dir_all(&downloads);
+    let dest = get_unique_path(&downloads, &name);
+
+    let mut out_file = std::fs::File::create(&dest)?;
+
+    out_file.write_all(buffered_bytes)?;
+    let buffered_len = buffered_bytes.len() as u64;
+
+    let remaining = content_length.saturating_sub(buffered_len);
+    if remaining > 0 {
+        let mut body_reader = read_stream.take(remaining);
+        io::copy(&mut body_reader, &mut out_file)?;
+    }
+    out_file.flush()?;
+
+    let path_str = dest.to_string_lossy().into_owned();
+    if let Some(ref app) = share.app {
+        let _ = app.emit("notch://shelf-add", &path_str);
+        let _ = app.emit("phone-share://uploaded", serde_json::json!({ "path": path_str, "name": name }));
+    }
+
+    let resp = format!("{{\"ok\":true,\"name\":\"{}\"}}", escape(&name));
+    respond_cors_json(stream, "200 OK", resp.as_bytes())
+}
+
 fn handle(mut stream: TcpStream, share: &Share) -> io::Result<()> {
     // Accepted sockets inherit non-blocking on Windows.
     stream.set_nonblocking(false)?;
     stream.set_write_timeout(Some(Duration::from_secs(60)))?;
+    let read_stream = stream.try_clone()?;
     // Read the whole head: closing with unread bytes resets the connection and can cut the response short.
-    let mut reader = BufReader::new(Deadline(&stream, Instant::now() + HEAD_TIMEOUT).take(MAX_HEAD));
+    let mut reader = BufReader::new(Deadline(&read_stream, Instant::now() + HEAD_TIMEOUT).take(MAX_HEAD));
     let mut request = String::new();
     reader.read_line(&mut request)?;
     let mut line = String::new();
+    let mut content_length: u64 = 0;
     loop {
         line.clear();
         if reader.read_line(&mut line)? == 0 || line == "\r\n" || line == "\n" {
             break;
         }
+        if let Some(val) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+            content_length = val.trim().parse::<u64>().unwrap_or(0);
+        }
     }
     let mut parts = request.split_whitespace();
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
     let head = method == "HEAD";
+
+    if method == "OPTIONS" {
+        return respond_cors(&mut stream);
+    }
+
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+
+    if method == "POST" {
+        let is_upload = path == "/upload" || path.ends_with("/upload");
+        if is_upload {
+            let buffered = reader.buffer().to_vec();
+            return handle_upload(&mut stream, &read_stream, &buffered, query, share, content_length);
+        }
+        return respond(&mut stream, "405 Method Not Allowed", "text/plain", b"", head);
+    }
+
     if method != "GET" && !head {
         return respond(&mut stream, "405 Method Not Allowed", "text/plain", b"", head);
     }
-    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+
+    if path == "/" || path.is_empty() || path == "/index.html" {
+        let page = page(share);
+        return respond(&mut stream, "200 OK", "text/html; charset=utf-8", page.as_bytes(), head);
+    }
+
     let rest = path.strip_prefix('/').and_then(|p| p.strip_prefix(share.token.as_str()));
     match rest {
         Some("") | Some("/") => {
@@ -285,7 +425,7 @@ fn handle(mut stream: TcpStream, share: &Share) -> io::Result<()> {
                     let disposition = format!("{}; filename=\"{}\"; filename*=UTF-8''{}", if image.is_some() { "inline" } else { "attachment" }, ascii_name(&name), percent(&name));
                     write!(
                         stream,
-                        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {len}\r\nContent-Disposition: {disposition}\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n",
+                        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {len}\r\nContent-Disposition: {disposition}\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
                         image.unwrap_or("application/octet-stream")
                     )?;
                     if !head {
@@ -300,9 +440,25 @@ fn handle(mut stream: TcpStream, share: &Share) -> io::Result<()> {
     }
 }
 
+fn respond_cors_json(stream: &mut TcpStream, status: &str, body: &[u8]) -> io::Result<()> {
+    let out = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(out.as_bytes())?;
+    stream.write_all(body)?;
+    stream.flush()
+}
+
+fn respond_cors(stream: &mut TcpStream) -> io::Result<()> {
+    let out = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    stream.write_all(out.as_bytes())?;
+    stream.flush()
+}
+
 fn respond(stream: &mut TcpStream, status: &str, kind: &str, body: &[u8], head: bool) -> io::Result<()> {
     let out = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nAccess-Control-Allow-Origin: *\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:\r\nConnection: close\r\n\r\n",
         body.len()
     );
     stream.write_all(out.as_bytes())?;
@@ -349,11 +505,23 @@ footer{display:flex;align-items:center;justify-content:center;gap:7px;margin-top
 footer svg{width:14px;height:14px;flex:none}
 @keyframes in{from{opacity:0;transform:translateY(10px)}}
 @media (prefers-reduced-motion:reduce){header,.row{animation:none}}
+.upload-card{margin-top:20px;padding:18px;border-radius:20px;background:var(--card);border:1px dashed var(--line);text-align:center;animation:in .5s cubic-bezier(.22,1,.36,1) both}
+.upload-title{font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px}
+.upload-title svg{width:18px;height:18px}
+.upload-sub{font-size:13px;color:var(--dim);margin:6px 0 14px}
+.upload-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 22px;border-radius:30px;background:var(--amber);color:var(--on);font-size:14px;font-weight:700;border:none;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:opacity .15s}
+.upload-btn svg{width:16px;height:16px}
+.upload-btn:active{opacity:.85}
+.upload-list{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+.up-row{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid var(--line);font-size:13px}
+.up-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:65%;font-weight:600}
+.up-status{font-weight:700;color:var(--amber);font-size:12px}
 "#;
 
 const DOWN: &str = r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5.5 20h13"/></svg>"#;
 const WIFI: &str = r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.8 12.5a9.5 9.5 0 0 1 12.4 0M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r=".6" fill="currentColor"/></svg>"#;
 const FILE: &str = r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>"#;
+const UPLOAD_ICON: &str = r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>"#;
 
 /// The MIME type of an image the phone's browser can show, by extension.
 fn image_type(path: &std::path::Path) -> Option<&'static str> {
@@ -382,7 +550,7 @@ fn tint(ext: &str) -> (&'static str, &'static str) {
     }
 }
 
-/// The page the QR opens: one card per file, a tap downloads it. No script; every name is escaped.
+/// The page the QR opens: one card per file, a tap downloads it, plus an upload dropzone for phone to PC exchange.
 fn page(share: &Share) -> String {
     let mut total = 0;
     let rows: String = share
@@ -414,19 +582,75 @@ fn page(share: &Share) -> String {
         .collect();
     let text = &share.text;
     let from = share.from.as_deref().map(|f| format!("<p class=\"from\">{}</p>", escape(f))).unwrap_or_default();
+    let file_list_section = if !rows.is_empty() {
+        format!("<div class=\"list\">{rows}</div><p class=\"hint\">{hint}</p>", hint = escape(&text.hint))
+    } else {
+        String::new()
+    };
+
     format!(
         "<!doctype html><html lang=\"{lang}\" dir=\"{dir}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\
 <meta name=\"theme-color\" content=\"#0b0b0e\" media=\"(prefers-color-scheme: dark)\"><meta name=\"theme-color\" content=\"#f3f3f6\" media=\"(prefers-color-scheme: light)\">\
 <link rel=\"icon\" href=\"data:image/svg+xml,{icon}\"><title>{title} · Crest</title><style>{STYLE}</style></head><body><main>\
 <header>{LOGO}<div>{from}<h1>{title}</h1><p class=\"total\">{count} · {total}</p></div></header>\
-<div class=\"list\">{rows}</div><p class=\"hint\">{hint}</p><footer>{WIFI}<span>{footer}</span></footer></main></body></html>",
+{file_list_section}\
+<section class=\"upload-card\">\
+<div class=\"upload-title\">{upload_icon}<span>Subir a la PC</span></div>\
+<p class=\"upload-sub\">Envía fotos o archivos directamente a Descargas</p>\
+<input type=\"file\" id=\"filePicker\" multiple style=\"display:none\" onchange=\"uploadSelected(this.files)\">\
+<button type=\"button\" class=\"upload-btn\" onclick=\"document.getElementById('filePicker').click()\">\
+{upload_icon}<span>Elegir archivos / Fotos</span>\
+</button>\
+<div id=\"uploadList\" class=\"upload-list\"></div>\
+</section>\
+<footer>{WIFI}<span>{footer}</span></footer></main>\
+<script>\
+const TOKEN='{token}';\
+function uploadSelected(files){{\
+if(!files||!files.length)return;\
+const list=document.getElementById('uploadList');\
+for(let i=0;i<files.length;i++){{\
+const file=files[i];\
+const row=document.createElement('div');\
+row.className='up-row';\
+row.innerHTML='<span class=\"up-name\">'+escapeHtml(file.name)+'</span><span class=\"up-status\">Subiendo...</span>';\
+list.prepend(row);\
+const statusEl=row.querySelector('.up-status');\
+const xhr=new XMLHttpRequest();\
+xhr.open('POST','/'+TOKEN+'/upload?name='+encodeURIComponent(file.name));\
+xhr.upload.onprogress=function(e){{\
+if(e.lengthComputable){{\
+statusEl.textContent=Math.round((e.loaded/e.total)*100)+'%';\
+}}\
+}};\
+xhr.onload=function(){{\
+if(xhr.status>=200&&xhr.status<300){{\
+statusEl.textContent='✓ Guardado en PC';\
+statusEl.style.color='#30d158';\
+}}else{{\
+statusEl.textContent='Error';\
+statusEl.style.color='#ff453a';\
+}}\
+}};\
+xhr.onerror=function(){{\
+statusEl.textContent='Fallo de red';\
+statusEl.style.color='#ff453a';\
+}};\
+xhr.send(file);\
+}}\
+}}\
+function escapeHtml(s){{\
+return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');\
+}}\
+</script></body></html>",
         lang = escape(&text.lang),
         dir = if text.dir == "rtl" { "rtl" } else { "ltr" },
         icon = percent(LOGO),
         title = escape(&text.title),
         count = escape(&text.count),
         total = bytes(total),
-        hint = escape(&text.hint),
+        token = share.token,
+        upload_icon = UPLOAD_ICON,
         footer = escape(&text.footer),
     )
 }
@@ -477,7 +701,7 @@ mod tests {
         let stop = Arc::new(AtomicBool::new(false));
         let s = stop.clone();
         let text = PageText { lang: "it".into(), title: "1 <file>".into(), ..Default::default() };
-        let share = Share { token: "abc".into(), files, text, from: Some("PC".into()) };
+        let share = Share { token: "abc".into(), files, text, from: Some("PC".into()), app: None };
         thread::spawn(move || serve(listener, share, s, lifetime));
         (port, stop)
     }
@@ -534,10 +758,24 @@ mod tests {
     #[test]
     fn page_follows_the_text_direction_and_keeps_the_light_tile_colour() {
         let text = PageText { dir: "rtl".into(), ..Default::default() };
-        let share = Share { token: "abc".into(), files: vec![], text, from: None };
+        let share = Share { token: "abc".into(), files: vec![], text, from: None, app: None };
         assert!(page(&share).contains("dir=\"rtl\""));
         // The light theme's tile colour only wins when it comes after the base rule.
         assert!(STYLE.find("color:var(--k)").unwrap() < STYLE.find("color-mix").unwrap());
+    }
+
+    #[test]
+    fn upload_endpoint_receives_file() {
+        let (port, stop) = start(vec![], LIFETIME);
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let payload = b"Hello from phone camera!";
+        write!(s, "POST /abc/upload?name=test_photo.jpg HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", payload.len()).unwrap();
+        s.write_all(payload).unwrap();
+        let mut resp = String::new();
+        s.read_to_string(&mut resp).unwrap();
+        assert!(resp.starts_with("HTTP/1.1 200 OK"));
+        assert!(resp.contains("\"ok\":true"));
+        stop.store(true, Ordering::Relaxed);
     }
 
     #[test]
