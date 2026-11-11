@@ -89,6 +89,8 @@ pub mod usage;
 mod vault;
 mod mic;
 mod sharing;
+pub mod google_sync;
+pub mod ocr;
 
 // The Mac's own versions of what the shared modules call into (src/macos/); the other Windows modules have no Mac
 // counterpart yet and their tools are hidden there.
@@ -536,6 +538,20 @@ pub fn run() {
             quick_send::adb_devices,
             quick_send::adb_push,
             quick_send::telegram_share,
+            google_sync::google_auth_status,
+            google_sync::google_auth_start,
+            google_sync::google_auth_save_tokens,
+            google_sync::google_auth_disconnect,
+            google_sync::gtasks_list_lists,
+            google_sync::gtasks_list_tasks,
+            google_sync::gtasks_create_task,
+            google_sync::gtasks_patch_task,
+            google_sync::gtasks_delete_task,
+            google_sync::gcal_list_calendars,
+            google_sync::gcal_list_events,
+            google_sync::gcal_create_event,
+            google_sync::gcal_next_event,
+            ocr::ocr_screen_snip,
             ];
             move |invoke| {
                 if !command_allowed(invoke.message.webview_ref().label(), invoke.message.command()) {

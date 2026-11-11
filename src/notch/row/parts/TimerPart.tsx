@@ -4,21 +4,32 @@ import { measureText } from "../measure";
 import { modeTint } from "../../../features/timer/looks";
 import { settings } from "../../../settings/store";
 
-const ICON = 17, GAP = 4;
+const ICON = 17, GAP = 4, TASK_MAX = 120;
 
-/** Room for the longest the countdown can read: the full duration, every digit an 8 ("180:00" too). */
-export const timerWidth = (duration: number) => ICON + GAP + measureText(formatClock(duration).replace(/\d/g, "8"));
+/** Room for countdown and optional Academic Pomodoro task title. */
+export const timerWidth = (duration: number, taskTitle?: string | null) => {
+  const clockW = measureText(formatClock(duration).replace(/\d/g, "8"));
+  const taskW = taskTitle ? Math.min(TASK_MAX, measureText(`${taskTitle} · `)) : 0;
+  return ICON + GAP + taskW + clockW;
+};
 
-/** A running timer: icon and countdown, in the focus colour (Settings, Timer) or green for a break. Finished, it belongs to the notices. */
+/** A running timer: icon, task title (if linked to Google Tasks) and countdown. */
 export function TimerPart({ paused }: { paused: boolean }) {
   const s = timer.use();
   const color = settings.use().timer.color;
   // Ticks when the countdown's own second changes, not the wall clock's; not at all under a notice.
   const now = useSecondTick(s.endsAt !== null && !paused, (s.endsAt ?? 0) % 1000);
+  const taskTitle = s.linkedTask?.title;
+
   return (
     <span className="flex shrink-0 items-center" style={{ gap: GAP, color: modeTint(s.mode, color) }}>
       <Timer size={ICON} weight="bold" className="shrink-0" />
-      <span className="tabular whitespace-nowrap text-footnote font-medium" style={{ width: timerWidth(s.duration) - ICON - GAP }}>
+      {taskTitle && (
+        <span className="truncate text-footnote font-medium text-label" style={{ maxWidth: TASK_MAX }}>
+          {taskTitle} ·
+        </span>
+      )}
+      <span className="tabular whitespace-nowrap text-footnote font-medium">
         {formatClock(remainingOf(s, now))}
       </span>
     </span>

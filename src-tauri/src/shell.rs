@@ -42,6 +42,8 @@ struct Bound {
     mic: Option<Shortcut>,
     /// OmniSearch Alt+Space shortcut.
     omnisearch: Option<Shortcut>,
+    /// Instant OCR Win+Shift+O shortcut.
+    ocr: Option<Shortcut>,
     /// The tools' own shortcuts and the tool id each opens.
     tools: Vec<(Shortcut, String)>,
     /// The launcher's Alt+N keys and the app id each opens.
@@ -167,6 +169,9 @@ pub async fn hotkeys_apply(config: HotkeyConfig, app: AppHandle, state: State<'_
     if b.omnisearch.is_none() {
         let _ = bind(&app, "Alt+Space", &mut b.omnisearch);
     }
+    if b.ocr.is_none() {
+        let _ = bind(&app, "Win+Shift+O", &mut b.ocr);
+    }
     Ok(status)
 }
 
@@ -213,7 +218,7 @@ pub fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
         return;
     }
     let id = shortcut.id();
-    let (open, hide, resize, find, mic, omnisearch, tool, launch) = {
+    let (open, hide, resize, find, mic, omnisearch, ocr, tool, launch) = {
         let b = app.state::<Hotkeys>();
         let b = b.0.lock().unwrap();
         (
@@ -223,6 +228,7 @@ pub fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
             b.find.is_some_and(|s| s.id() == id),
             b.mic.is_some_and(|s| s.id() == id),
             b.omnisearch.is_some_and(|s| s.id() == id),
+            b.ocr.is_some_and(|s| s.id() == id),
             b.tools.iter().find(|(s, _)| s.id() == id).map(|(_, tool)| tool.clone()),
             b.launch.iter().find(|(s, _)| s.id() == id).map(|(_, app_id)| app_id.clone()),
         )
@@ -233,6 +239,9 @@ pub fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
         crate::launcher::launch_from_key(app, app_id);
         #[cfg(not(windows))]
         let _ = app_id;
+    } else if ocr {
+        display::unhide(app);
+        let _ = app.emit("notch://ocr", ());
     } else if omnisearch {
         display::unhide(app);
         let _ = app.emit("notch://omnisearch", ());

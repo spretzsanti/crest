@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { AlarmIcon, Broom, Check, Clock, ClockClockwise, Plus, Star, X } from "@phosphor-icons/react";
+import { AlarmIcon, ArrowClockwise, Broom, Check, Clock, ClockClockwise, Plus, Star, X } from "@phosphor-icons/react";
 import { springs } from "../../design/motion";
 import { HeaderActions, HeaderButton } from "../../notch/header";
 import { Segmented } from "../../ui/controls";
@@ -8,7 +8,7 @@ import { formatTime } from "../../lib/format";
 import { locale, t } from "../../i18n";
 import { DEFAULT_PROJECT, TASK_COLORS, nextTask, sortTasks, type Project, type Task, type TaskColor } from "./model";
 import { dayDiff, defaultDay, dueAt, parseTime } from "./schedule";
-import { dueTasks, todoActions, todos } from "./store";
+import { dueTasks, googleTasksConnected, googleTasksLoading, googleUserEmail, syncGoogleTasks, todoActions, todos } from "./store";
 import { colorVar } from "./colors";
 import { DateChip, useDraftDate } from "./DraftDate";
 
@@ -45,16 +45,26 @@ export function TodosView() {
     setDraft("");
   };
 
+  const isGoogle = googleTasksConnected.use();
+  const loading = googleTasksLoading.use();
+  const userEmail = googleUserEmail.use();
+
   return (
     <div className="flex h-full gap-3 px-4 pt-1 pb-1">
-      {mine.some((x) => x.done) && (
-        <HeaderActions>
+      <HeaderActions>
+        <HeaderButton
+          label={isGoogle ? t("Google Tasks synchronisieren") : t("Mit Google Tasks verbinden")}
+          onClick={() => (isGoogle ? syncGoogleTasks() : todoActions.connectGoogle())}
+        >
+          <ArrowClockwise size={14} weight="bold" className={loading ? "animate-spin" : ""} />
+        </HeaderButton>
+        {mine.some((x) => x.done) && (
           <HeaderButton label={t("Erledigte entfernen")} onClick={() => todoActions.clearDone(active)}>
             <Broom size={14} weight="bold" />
           </HeaderButton>
-        </HeaderActions>
-      )}
-      <Projects projects={projects} active={active} tasks={tasks} ringing={new Set(due.map((x) => x.projectId))} />
+        )}
+      </HeaderActions>
+      <Projects projects={projects} active={active} tasks={tasks} ringing={new Set(due.map((x) => x.projectId))} isGoogle={isGoogle} userEmail={userEmail} onSync={syncGoogleTasks} onConnect={todoActions.connectGoogle} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <form
@@ -110,10 +120,53 @@ function useMinute(): number {
   return now;
 }
 
-function Projects({ projects, active, tasks, ringing }: { projects: Project[]; active: string; tasks: Task[]; ringing: Set<string> }) {
+function Projects({
+  projects,
+  active,
+  tasks,
+  ringing,
+  isGoogle,
+  userEmail,
+  onSync,
+  onConnect,
+}: {
+  projects: Project[];
+  active: string;
+  tasks: Task[];
+  ringing: Set<string>;
+  isGoogle: boolean;
+  userEmail: string | null;
+  onSync: () => void;
+  onConnect: () => void;
+}) {
   const [adding, setAdding] = useState(false);
   return (
-    <nav className="-ms-1 flex w-[150px] shrink-0 flex-col">
+    <nav className="-ms-1 flex w-[160px] shrink-0 flex-col">
+      {/* Google Tasks connection banner / indicator */}
+      <div className="mb-1 flex items-center justify-between px-2 py-1 rounded-[8px] bg-fill-1 text-caption text-label-3">
+        <span className="flex items-center gap-1.5 truncate">
+          <span className={`h-1.5 w-1.5 rounded-full ${isGoogle ? "bg-emerald-500" : "bg-label-4"}`} />
+          <span className="truncate">{isGoogle ? userEmail || "Google Tasks" : "Local Tasks"}</span>
+        </span>
+        {isGoogle ? (
+          <button
+            onClick={onSync}
+            className="pressable text-label-3 hover:text-label p-0.5"
+            title={t("Google Tasks synchronisieren")}
+          >
+            <ArrowClockwise size={11} weight="bold" />
+          </button>
+        ) : (
+          <button
+            onClick={onConnect}
+            className="pressable text-accent font-medium hover:underline text-[11px]"
+            title={t("Mit Google Tasks verbinden")}
+          >
+            Google
+          </button>
+        )}
+      </div>
+
       <div className="flex-1 overflow-y-auto [scrollbar-width:none]">
         {projects.map((p) => (
           <ProjectRow
@@ -123,7 +176,7 @@ function Projects({ projects, active, tasks, ringing }: { projects: Project[]; a
             ringing={ringing.has(p.id)}
             open={tasks.filter((x) => x.projectId === p.id && !x.done).length}
             next={nextTask(tasks, p.id)}
-            deletable={projects.length > 1}
+            deletable={projects.length > 1 && !isGoogle}
           />
         ))}
         {adding && (

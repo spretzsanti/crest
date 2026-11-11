@@ -1,6 +1,16 @@
 import { useEffect, useState } from "react";
-import { motion } from "motion/react";
-import { ArrowClockwise, CalendarBlank, CaretLeft, CaretRight, SlidersHorizontal, VideoCamera, WarningCircle } from "@phosphor-icons/react";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  ArrowClockwise,
+  CalendarBlank,
+  CaretLeft,
+  CaretRight,
+  Plus,
+  SlidersHorizontal,
+  VideoCamera,
+  WarningCircle,
+  X,
+} from "@phosphor-icons/react";
 import { content, spin } from "../../design/motion";
 import { formatAgo, formatTime } from "../../lib/format";
 import { HeaderActions, HeaderButton } from "../../notch/header";
@@ -10,7 +20,14 @@ import { settings } from "../../settings/store";
 import { Button, Empty, Skeleton } from "../../ui/controls";
 import { locale, t } from "../../i18n";
 import { agenda, dayLabel, meetingLink, monthGrid, startOfDay } from "./model";
-import { calendar, joinMeeting, refreshCalendar, useCalendarViewer } from "./store";
+import {
+  calendar,
+  googleCalConnected,
+  joinMeeting,
+  quickCreateEvent,
+  refreshCalendar,
+  useCalendarViewer,
+} from "./store";
 
 const DAYS = 7;
 
@@ -20,7 +37,6 @@ export const calendarError: Record<string, string> = {
   "bad-url": "Adresse ungültig",
   auth: "Anmeldung abgelehnt",
   "not-found": "Kalender nicht gefunden",
-  // reqwest reports a refused certificate as a failed connection too, so the text names both.
   offline: "Server nicht erreichbar oder Zertifikat ungültig",
   "too-large": "Kalender zu groß",
   parse: "Kalender nicht lesbar",
@@ -34,29 +50,62 @@ export function eventTime(e: CalendarEvent): string {
   return e.end > e.start ? `${formatTime(e.start)} - ${formatTime(e.end)}` : formatTime(e.start);
 }
 
-/*
- *   TODAY · SUN 1 NOV
- *   ▍ 09:30 - 09:45   Standup
- *   ▍ 12:30 - 13:30   Lunch with Sam · Café Central
- *   TOMORROW · MON 2 NOV
- *   ▍ All day         Mum's birthday
- */
 export function CalendarView() {
   useCalendarViewer();
   const sources = settings.use().calendar.sources;
+  const isGoogle = googleCalConnected.use();
   const { data, error, loading } = calendar.use();
-  // The day the list starts from, picked in the month; null is today (so it moves on at midnight).
+
   const [picked, setPicked] = useState<number | null>(null);
-  // Past events fade, the footer age and "today" follow the clock while the view stays open.
   const [now, setNow] = useState(Date.now);
+
+  // Quick event creation state
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newStart, setNewStart] = useState("14:00");
+  const [newEnd, setNewEnd] = useState("16:00");
+  const [newLoc, setNewLoc] = useState("");
+  const [creating, setCreating] = useState(false);
+
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(id);
   }, []);
 
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim()) return;
+    setCreating(true);
+    try {
+      const today = new Date(picked ?? now);
+      const [sh, sm] = newStart.split(":").map(Number);
+      const [eh, em] = newEnd.split(":").map(Number);
+
+      const startDate = new Date(today);
+      startDate.setHours(isNaN(sh) ? 14 : sh, isNaN(sm) ? 0 : sm, 0, 0);
+
+      const endDate = new Date(today);
+      endDate.setHours(isNaN(eh) ? 16 : eh, isNaN(em) ? 0 : em, 0, 0);
+
+      await quickCreateEvent(newTitle.trim(), startDate, endDate, undefined, newLoc.trim() || undefined);
+      setNewTitle("");
+      setNewLoc("");
+      setShowCreate(false);
+    } catch (err) {
+      console.error("Create event error:", err);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const hasAnyCalendars = sources.length > 0 || isGoogle || (data?.calendars.length ?? 0) > 0;
+
   const actions = (
     <HeaderActions>
-      <HeaderButton label={t("Aktualisieren")} disabled={!sources.length} onClick={() => void refreshCalendar(true)}>
+      <HeaderButton label={showCreate ? t("Schließen") : t("Neuer Termin")} onClick={() => setShowCreate((v) => !v)}>
+        {showCreate ? <X size={14} weight="bold" /> : <Plus size={14} weight="bold" />}
+      </HeaderButton>
+      <HeaderButton label={t("Aktualisieren")} disabled={!hasAnyCalendars} onClick={() => void refreshCalendar(true)}>
         <motion.span className="flex" animate={{ rotate: loading ? 360 : 0 }} transition={loading ? spin : { duration: 0 }}>
           <ArrowClockwise size={14} weight="bold" />
         </motion.span>
@@ -67,25 +116,30 @@ export function CalendarView() {
     </HeaderActions>
   );
 
-  if (!sources.length) {
+  if (!hasAnyCalendars) {
     return (
       <>
         {actions}
         <Empty
           icon={CalendarBlank}
           title={t("Kein Kalender verbunden")}
-          text={t("Füge einen ICS-Link (Google, Outlook, iCloud) oder ein CalDAV-Konto hinzu. Crest liest nur.")}
+          text={t("Füge einen Google Calendar, ICS-Link oder ein CalDAV-Konto hinzu.")}
           action={<Button onClick={() => navigate("settings", "calendar")}>{t("Kalender hinzufügen")}</Button>}
         />
       </>
     );
   }
+
   if (!data) {
     return (
       <>
         {actions}
         {error ? (
-          <Empty icon={WarningCircle} title={t(calendarError[error] ?? "Abruf fehlgeschlagen")} action={<Button onClick={() => void refreshCalendar(true)}>{t("Erneut versuchen")}</Button>} />
+          <Empty
+            icon={WarningCircle}
+            title={t(calendarError[error] ?? "Abruf fehlgeschlagen")}
+            action={<Button onClick={() => void refreshCalendar(true)}>{t("Erneut versuchen")}</Button>}
+          />
         ) : (
           <div className="flex h-full flex-col gap-3 px-5 pt-2">
             <Skeleton className="h-4 w-1/3" />
@@ -100,7 +154,6 @@ export function CalendarView() {
   const colors = new Map(data.calendars.map((c) => [c.id, c.color]));
   const names = new Map(data.calendars.map((c) => [c.id, c.name]));
   const from = picked ?? startOfDay(now);
-  // The picked day always shows; later days only when something is on.
   const days = agenda(data.events, from, DAYS).filter((d, i) => i === 0 || d.events.length);
   const failing = data.sources.filter((s) => s.error);
   const label = (day: number) => {
@@ -122,6 +175,58 @@ export function CalendarView() {
       animate={{ opacity: 1, filter: "blur(0px)", transition: content.enter }}
     >
       {actions}
+
+      {/* Quick Event Creation Form */}
+      <AnimatePresence>
+        {showCreate && (
+          <motion.form
+            onSubmit={handleCreate}
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-2 flex flex-wrap items-center gap-2 rounded-[12px] bg-fill-2 p-2.5 text-body overflow-hidden shrink-0"
+          >
+            <input
+              type="text"
+              placeholder={t("Titel des Events (z.B. Control Básico)")}
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              className="flex-1 min-w-[160px] rounded-[8px] bg-fill-1 px-2.5 py-1 text-label outline-none placeholder:text-label-4"
+              autoFocus
+            />
+            <input
+              type="text"
+              placeholder="14:00"
+              value={newStart}
+              onChange={(e) => setNewStart(e.target.value)}
+              className="w-16 rounded-[8px] bg-fill-1 px-2 py-1 text-center text-label outline-none"
+            />
+            <span className="text-label-4">–</span>
+            <input
+              type="text"
+              placeholder="16:00"
+              value={newEnd}
+              onChange={(e) => setNewEnd(e.target.value)}
+              className="w-16 rounded-[8px] bg-fill-1 px-2 py-1 text-center text-label outline-none"
+            />
+            <input
+              type="text"
+              placeholder={t("Ort / Meet")}
+              value={newLoc}
+              onChange={(e) => setNewLoc(e.target.value)}
+              className="w-28 rounded-[8px] bg-fill-1 px-2 py-1 text-label outline-none placeholder:text-label-4"
+            />
+            <button
+              type="submit"
+              disabled={creating || !newTitle.trim()}
+              className="pressable rounded-[8px] bg-accent px-3 py-1 font-medium text-white hover:brightness-110 disabled:opacity-50"
+            >
+              {creating ? "..." : t("Erstellen")}
+            </button>
+          </motion.form>
+        )}
+      </AnimatePresence>
+
       <div className="flex min-h-0 flex-1 gap-5">
         <Month events={data.events} colors={colors} now={now} picked={from} onPick={(d) => setPicked(d === startOfDay(now) ? null : d)} />
         <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1 [scrollbar-width:none]" style={{ maskImage: "linear-gradient(180deg, #000 calc(100% - 20px), transparent)" }}>
@@ -141,7 +246,12 @@ export function CalendarView() {
                       {e.location && <span className="text-label-3"> · {e.location}</span>}
                     </span>
                     {link && (
-                      <button aria-label={t("Beitreten")} className="pressable pressable-fill flex size-6 shrink-0 items-center justify-center rounded-full bg-fill-2 text-label" title={`${t("Beitreten")} · ${new URL(link).hostname}`} onClick={() => joinMeeting(e.id, link)}>
+                      <button
+                        aria-label={t("Beitreten")}
+                        className="pressable pressable-fill flex size-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
+                        title={`${t("Beitreten")} · ${new URL(link).hostname}`}
+                        onClick={() => joinMeeting(e.id, link)}
+                      >
                         <VideoCamera size={13} weight="fill" />
                       </button>
                     )}
@@ -159,7 +269,6 @@ export function CalendarView() {
   );
 }
 
-/** First day of the week for the UI language (Intl week info), Monday when the runtime cannot tell. */
 function firstWeekday(): number {
   try {
     const l = new Intl.Locale(locale()) as Intl.Locale & { getWeekInfo?: () => { firstDay: number }; weekInfo?: { firstDay: number } };
@@ -170,15 +279,8 @@ function firstWeekday(): number {
   }
 }
 
-/*
- *   ‹  November 2026  ›
- *   M  T  W  T  F  S  S
- *   26 27 28 29 30 31  1
- *    2  3  4 ...           a dot per calendar with events that day
- */
 function Month(p: { events: CalendarEvent[]; colors: Map<string, string>; now: number; picked: number; onPick: (day: number) => void }) {
   const today = startOfDay(p.now);
-  // From the previous month to two ahead: the span calendar.rs fetches.
   const [shift, setShift] = useState(0);
   const anchor = new Date(today);
   anchor.setDate(1);

@@ -109,12 +109,12 @@ export function CompactRow({ room, scale, covered, onWidth }: { room: number; sc
     if (!closed.parts[id] && id !== "readings") continue;
     // A running timer and a Discord call stay next to the line; they only show while active anyway.
     if (lyricOnly && id !== "timer" && id !== "discord") continue;
-    if (id === "timer" && running) fixed(id, timerWidth(timer.get().duration), () => <TimerPart paused={covered} />);
+    if (id === "timer" && running) fixed(id, timerWidth(timer.get().duration, timer.get().linkedTask?.title), () => <TimerPart paused={covered} />);
     else if (id === "discord" && call) fixed(id, DISCORD_WIDTH, () => <DiscordPart call={call} paused={covered} />);
     else if (id === "equalizer" && np && playing) fixed(id, 16, () => <Equalizer playing={np.isPlaying && !covered} />);
     else if (id === "github" && gh) fixed(id, githubWidth(gh.count), () => <GithubPart count={gh.count} level={gh.level} />);
     else if (id === "weather" && weather) fixed(id, weatherWidth(), () => <WeatherPart now={weather} />);
-    else if (id === "calendar" && next) fixed(id, nextEventWidth(next.text), () => <NextEventPart text={next.text} color={next.color} />);
+    else if (id === "calendar" && next) fixed(id, nextEventWidth(next.text, !!next.link), () => <NextEventPart text={next.text} color={next.color} link={next.link} eventId={next.event.id} />);
     else if (id === "script" && scripted.length) fixed(id, scriptPartsWidth(scripted), () => <ScriptParts parts={scripted} />);
     else if (id === "downloads" && dl.length) {
       const caption = downloadsCaption(dl);

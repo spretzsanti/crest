@@ -14,6 +14,7 @@ import {
 import { omnisearch, revealFile, type OmniResult } from "../../platform/services";
 import { addToShelf } from "../shelf/store";
 import { todoActions } from "../todos/store";
+import { quickCreateEvent } from "../calendar/store";
 import { closeNotch } from "../../notch/useNotchState";
 import { t } from "../../i18n";
 
@@ -120,8 +121,17 @@ export function OmniSearchView() {
         return;
       }
       if (item.target.startsWith("action:calendar:")) {
-        await omnisearch.open(item.target, "open");
-        closeNotch();
+        const text = item.action_data || item.target.replace("action:calendar:", "");
+        const now = new Date();
+        const start = new Date(now.getTime() + 3600_000);
+        const end = new Date(now.getTime() + 7200_000);
+        try {
+          await quickCreateEvent(text, start, end);
+          showFeedback(t("Evento agendado en Google Calendar"));
+        } catch {
+          await omnisearch.open(item.target, "open");
+        }
+        setTimeout(closeNotch, 500);
         return;
       }
     }

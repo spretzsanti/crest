@@ -10,9 +10,9 @@
 mod audio;
 pub(crate) mod eyedropper;
 pub(crate) mod find;
-mod math;
+pub(crate) mod math;
 mod record;
-mod shot;
+pub(crate) mod shot;
 mod voice;
 
 use std::path::{Path, PathBuf};

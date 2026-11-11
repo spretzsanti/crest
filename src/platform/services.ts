@@ -1907,3 +1907,177 @@ function mockOmniSearch(query: string, prefix?: string | null): OmniResult[] {
   return res;
 }
 
+// ---------- Google Sync & Academic Tools ----------
+
+export interface GoogleAuthStatus {
+  connected: boolean;
+  email: string | null;
+  expires_at: number | null;
+}
+
+export interface GTaskList {
+  id: string;
+  title: string;
+  updated?: string;
+}
+
+export interface GTaskItem {
+  id: string;
+  title: string;
+  updated?: string;
+  notes?: string;
+  status: "needsAction" | "completed";
+  due?: string;
+  completed?: string;
+  list_id?: string;
+}
+
+export interface GCalendarMeta {
+  id: string;
+  summary: string;
+  primary?: boolean;
+  backgroundColor?: string;
+  foregroundColor?: string;
+}
+
+export interface GCalendarEventTime {
+  dateTime?: string;
+  date?: string;
+}
+
+export interface GCalendarEvent {
+  id: string;
+  summary?: string;
+  description?: string;
+  location?: string;
+  start?: GCalendarEventTime;
+  end?: GCalendarEventTime;
+  hangoutLink?: string;
+  htmlLink?: string;
+  status?: string;
+  calendarId?: string;
+  colorId?: string;
+}
+
+export async function googleAuthStatus(): Promise<GoogleAuthStatus> {
+  if (isNative) return invoke<GoogleAuthStatus>("google_auth_status");
+  return { connected: true, email: "santi@facultad.edu.ar", expires_at: Date.now() + 3600_000 };
+}
+
+export async function googleAuthStart(): Promise<string> {
+  if (isNative) return invoke<string>("google_auth_start");
+  return "https://accounts.google.com/o/oauth2/v2/auth";
+}
+
+export async function googleAuthSaveTokens(accessToken: string, refreshToken?: string, expiresIn?: number, clientId?: string, clientSecret?: string): Promise<void> {
+  if (isNative) return invoke("google_auth_save_tokens", { accessToken, refreshToken, expiresIn, clientId, clientSecret });
+}
+
+export async function googleAuthDisconnect(): Promise<void> {
+  if (isNative) return invoke("google_auth_disconnect");
+}
+
+export async function gtasksListLists(): Promise<GTaskList[]> {
+  if (isNative) return invoke<GTaskList[]>("gtasks_list_lists");
+  return [
+    { id: "facultad", title: "Facultad" },
+    { id: "mis_tareas", title: "Mis tareas" },
+    { id: "bioingenieria", title: "Bioingeniería" },
+  ];
+}
+
+export async function gtasksListTasks(listId: string): Promise<GTaskItem[]> {
+  if (isNative) return invoke<GTaskItem[]>("gtasks_list_tasks", { listId });
+  if (listId === "facultad") {
+    return [
+      { id: "t1", title: "Estudiar unidad 10 de Control Básico", status: "needsAction", list_id: "facultad", notes: "Capítulo de estabilidad y diagramas de Bode" },
+      { id: "t2", title: "Entregar TP Señales y Sistemas", status: "needsAction", list_id: "facultad", due: new Date(Date.now() + 86400000).toISOString() },
+      { id: "t3", title: "Repasar filtros analógicos activos", status: "completed", list_id: "facultad" },
+    ];
+  }
+  return [
+    { id: "t4", title: "Comprar componentes protoboard", status: "needsAction", list_id: listId },
+  ];
+}
+
+export async function gtasksCreateTask(listId: string, title: string, notes?: string, due?: string): Promise<GTaskItem> {
+  if (isNative) return invoke<GTaskItem>("gtasks_create_task", { listId, title, notes, due });
+  return { id: `mock_${Date.now()}`, title, notes, due, status: "needsAction", list_id: listId };
+}
+
+export async function gtasksPatchTask(listId: string, taskId: string, status: string, title?: string, notes?: string, due?: string): Promise<GTaskItem> {
+  if (isNative) return invoke<GTaskItem>("gtasks_patch_task", { listId, taskId, status, title, notes, due });
+  return { id: taskId, title: title || "Task", status: status as "needsAction" | "completed", list_id: listId, notes, due };
+}
+
+export async function gtasksDeleteTask(listId: string, taskId: string): Promise<void> {
+  if (isNative) return invoke("gtasks_delete_task", { listId, taskId });
+}
+
+export async function gcalListCalendars(): Promise<GCalendarMeta[]> {
+  if (isNative) return invoke<GCalendarMeta[]>("gcal_list_calendars");
+  return [
+    { id: "primary", summary: "Facultad (Personal)", primary: true, backgroundColor: "#0284c7" },
+    { id: "clases", summary: "Clases y Laboratorios", backgroundColor: "#10b981" },
+    { id: "parciales", summary: "Exámenes y Entregas", backgroundColor: "#f43f5e" },
+  ];
+}
+
+export async function gcalListEvents(calendarId?: string, timeMin?: string, timeMax?: string): Promise<GCalendarEvent[]> {
+  if (isNative) return invoke<GCalendarEvent[]>("gcal_list_events", { calendarId, timeMin, timeMax });
+  const now = Date.now();
+  return [
+    {
+      id: "ev1",
+      summary: "Control Básico (Teoría)",
+      description: "Clase sincrónica de Control Automático",
+      location: "Aula Magna / Meet",
+      start: { dateTime: new Date(now + 15 * 60_000).toISOString() },
+      end: { dateTime: new Date(now + 120 * 60_000).toISOString() },
+      hangoutLink: "https://meet.google.com/abc-defg-hij",
+      calendarId: "clases",
+    },
+    {
+      id: "ev2",
+      summary: "Laboratorio de Bioinstrumentación",
+      location: "Lab 3",
+      start: { dateTime: new Date(now + 180 * 60_000).toISOString() },
+      end: { dateTime: new Date(now + 300 * 60_000).toISOString() },
+      calendarId: "clases",
+    },
+  ];
+}
+
+export async function gcalCreateEvent(calendarId: string | undefined, summary: string, start: string, end: string, description?: string, location?: string): Promise<GCalendarEvent> {
+  if (isNative) return invoke<GCalendarEvent>("gcal_create_event", { calendarId, summary, start, end, description, location });
+  return {
+    id: `gcal_${Date.now()}`,
+    summary,
+    start: { dateTime: start },
+    end: { dateTime: end },
+    description,
+    location,
+    calendarId: calendarId || "primary",
+  };
+}
+
+export async function gcalNextEvent(): Promise<GCalendarEvent | null> {
+  if (isNative) return invoke<GCalendarEvent | null>("gcal_next_event");
+  const now = Date.now();
+  return {
+    id: "ev1",
+    summary: "Control Básico",
+    location: "Meet",
+    start: { dateTime: new Date(now + 15 * 60_000).toISOString() },
+    end: { dateTime: new Date(now + 120 * 60_000).toISOString() },
+    hangoutLink: "https://meet.google.com/abc-defg-hij",
+    calendarId: "clases",
+  };
+}
+
+export async function ocrScreenSnip(rect?: [number, number, number, number]): Promise<string> {
+  if (isNative) return invoke<string>("ocr_screen_snip", { rect });
+  return "f(t) = \\frac{1}{2\\pi} \\int_{-\\infty}^{\\infty} F(\\omega) e^{j\\omega t} d\\omega";
+}
+
+

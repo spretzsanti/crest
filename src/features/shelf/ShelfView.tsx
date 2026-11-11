@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   AndroidLogo,
   ArrowSquareOut,
+  Calculator,
+  Camera,
   Check,
   CheckSquare,
   CircleNotch,
@@ -26,11 +28,13 @@ import {
   X,
   type Icon,
 } from "@phosphor-icons/react";
+import { listen } from "@tauri-apps/api/event";
 import { fade, springs } from "../../design/motion";
 import { formatBytes } from "../../lib/format";
 import { draggingOut, drop, pasteFiles, takeDropped, usePasteFiles } from "../../platform/drop";
 import { HeaderActions, HeaderButton } from "../../notch/header";
 import { holdOpen } from "../../notch/useNotchState";
+import { navigate } from "../../notch/nav";
 import {
   adbDevices,
   adbPush,
@@ -39,6 +43,7 @@ import {
   filePreview,
   localsendDevices,
   localsendSend,
+  ocrScreenSnip,
   onPhoneShareLost,
   onPhoneShareUploaded,
   onShelfAdd,
@@ -81,6 +86,48 @@ import { Redacted } from "../../ui/controls";
  */
 import { shelf, addToShelf } from "./store";
 export { addToShelf, shelf };
+function evalMathSafe(expr: string): string | null {
+  try {
+    const cleaned = expr.trim();
+    if (!/[+\-*/^]/.test(cleaned) || !/\d/.test(cleaned)) return null;
+    if (/[;<>{}[\]$\\]/.test(cleaned)) return null;
+
+    const s = cleaned
+      .replace(/(\d+(?:\.\d+)?)\s*k\b/gi, "($1*1e3)")
+      .replace(/(\d+(?:\.\d+)?)\s*M\b/g, "($1*1e6)")
+      .replace(/(\d+(?:\.\d+)?)\s*m\b/g, "($1*1e-3)")
+      .replace(/(\d+(?:\.\d+)?)\s*u\b/gi, "($1*1e-6)")
+      .replace(/(\d+(?:\.\d+)?)\s*n\b/gi, "($1*1e-9)")
+      .replace(/(\d+(?:\.\d+)?)\s*p\b/gi, "($1*1e-12)")
+      .replace(/\bpi\b/gi, "Math.PI")
+      .replace(/\bsqrt\(([^)]+)\)/gi, "Math.sqrt($1)")
+      .replace(/\blog10\(([^)]+)\)/gi, "Math.log10($1)")
+      .replace(/\^/g, "**");
+
+    if (!/^[\d\s+\-*/().*MathPIsqrtoeElog,]+$/.test(s)) return null;
+
+    const fn = new Function(`"use strict"; return (${s});`);
+    const val = fn();
+    if (typeof val === "number" && !isNaN(val) && isFinite(val)) {
+      if (Math.abs(val) >= 1e6) return `${(val / 1e6).toFixed(2)} M`;
+      if (Math.abs(val) >= 1e3) return `${(val / 1e3).toFixed(2)} k`;
+      if (Math.abs(val) < 1e-6 && val !== 0) return `${(val * 1e9).toFixed(2)} n`;
+      if (Math.abs(val) < 1e-3 && val !== 0) return `${(val * 1e6).toFixed(2)} µ`;
+      if (Math.abs(val) < 1 && val !== 0) return `${(val * 1e3).toFixed(2)} m`;
+      return Number(val.toFixed(4)).toString();
+    }
+  } catch {}
+  return null;
+}
+
+function hexToRgb(hex: string): string | null {
+  const m = hex.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!m) return null;
+  let h = m[1];
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const num = parseInt(h, 16);
+  return `rgb(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255})`;
+}
 
 /** Movement in px before a press on a card becomes a drag. */
 const DRAG_START = 6;
@@ -162,6 +209,78 @@ export function ShelfView() {
   const [localDevices, setLocalDevices] = useState<LocalSendDevice[]>([]);
   const [adbDevs, setAdbDevs] = useState<AdbDevice[]>([]);
   const [sendingState, setSendingState] = useState<Record<string, "sending" | "done" | "error">>({});
+  const [smartClip, setSmartClip] = useState<{
+    type: "color" | "math" | "path";
+    raw: string;
+    actionLabel: string;
+    extra?: string;
+  } | null>(null);
+
+  const runOcr = async () => {
+    try {
+      const text = await ocrScreenSnip();
+      if (text?.trim()) {
+        shelf.set((l) => addText(l, text.trim(), Date.now(), crypto.randomUUID()));
+        setCopied("ocr");
+        setTimeout(() => setCopied(null), 1500);
+      }
+    } catch (e) {
+      fail(e, "OCR Snip");
+    }
+  };
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<void>("notch://ocr", () => {
+      void runOcr();
+    }).then((u) => {
+      unlisten = u;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const checkClipboard = async () => {
+      try {
+        const text = (await clipboardText()).trim();
+        if (!mounted || !text || text.length > 300) {
+          if (mounted) setSmartClip(null);
+          return;
+        }
+
+        const rgb = hexToRgb(text);
+        if (rgb) {
+          setSmartClip({ type: "color", raw: text, actionLabel: rgb, extra: rgb });
+          return;
+        }
+
+        const mathRes = evalMathSafe(text);
+        if (mathRes) {
+          setSmartClip({ type: "math", raw: text, actionLabel: `= ${mathRes}`, extra: mathRes });
+          return;
+        }
+
+        if ((text.includes(":\\") || text.startsWith("/")) && text.length < 260) {
+          setSmartClip({ type: "path", raw: text, actionLabel: text });
+          return;
+        }
+
+        if (mounted) setSmartClip(null);
+      } catch {
+        if (mounted) setSmartClip(null);
+      }
+    };
+
+    checkClipboard();
+    const id = setInterval(checkClipboard, 2500);
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -433,6 +552,14 @@ export function ShelfView() {
             <QrCode size={13} weight="bold" style={{ color: HUE_PALETTE.amber[0] }} />
             <span>Subir fotos desde el celular (QR)</span>
           </button>
+          <button
+            onClick={() => void runOcr()}
+            className="pressable mt-1 flex items-center gap-1.5 rounded-full bg-fill-2 px-3 py-1 text-caption text-label-2 hover:bg-fill-3 hover:text-label"
+            title="Capturar pantalla y extraer texto con Windows.Media.Ocr"
+          >
+            <Camera size={13} weight="bold" className="text-sky-400" />
+            <span>OCR de pantalla (Win+Shift+O)</span>
+          </button>
         </motion.div>
         <AnimatePresence>{share && <PhonePanel share={share} onStop={() => setShare(null)} />}</AnimatePresence>
       </div>
@@ -447,6 +574,9 @@ export function ShelfView() {
             {failed}
           </span>
         )}
+        <HeaderButton label={copied === "ocr" ? t("Erkannt!") : "OCR (Win+Shift+O)"} onClick={() => void runOcr()}>
+          <Camera size={14} weight="bold" />
+        </HeaderButton>
         {picked > 0 ? (
           <>
             <span className="tabular me-1 text-caption text-label-2">{t("{n} ausgewählt", { n: picked })}</span>
@@ -551,6 +681,79 @@ export function ShelfView() {
           <span>Mandar a Telegram</span>
         </button>
       </div>
+
+      {/* Smart Clipboard Contextual Action Bar */}
+      {smartClip && (
+        <div className="mb-2 flex shrink-0 items-center justify-between rounded-[10px] bg-fill-2 px-3 py-1.5 text-caption">
+          <div className="flex items-center gap-2 truncate">
+            {smartClip.type === "color" && (
+              <span className="size-3.5 rounded-full ring-1 ring-border shrink-0" style={{ backgroundColor: smartClip.raw }} />
+            )}
+            {smartClip.type === "math" && <Calculator size={13} weight="bold" className="text-amber-400 shrink-0" />}
+            {smartClip.type === "path" && <FolderOpen size={13} weight="bold" className="text-sky-400 shrink-0" />}
+            <span className="font-medium text-label truncate max-w-[200px]">{smartClip.raw}</span>
+            <span className="text-label-3">→</span>
+            <span className="font-semibold text-accent truncate">{smartClip.actionLabel}</span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {smartClip.type === "color" && (
+              <>
+                <button
+                  onClick={() => void navigator.clipboard.writeText(smartClip.extra!)}
+                  className="pressable rounded-[6px] bg-fill-3 px-2 py-0.5 text-label hover:bg-fill-4"
+                >
+                  Copiar RGB
+                </button>
+                <button
+                  onClick={() => navigate("colour")}
+                  className="pressable rounded-[6px] bg-accent/20 px-2 py-0.5 text-accent hover:bg-accent/30 font-medium"
+                >
+                  Abrir
+                </button>
+              </>
+            )}
+            {smartClip.type === "math" && (
+              <>
+                <button
+                  onClick={() => void navigator.clipboard.writeText(smartClip.extra!)}
+                  className="pressable rounded-[6px] bg-fill-3 px-2 py-0.5 text-label hover:bg-fill-4"
+                >
+                  Copiar resultado
+                </button>
+                <button
+                  onClick={() => navigate("calc")}
+                  className="pressable rounded-[6px] bg-accent/20 px-2 py-0.5 text-accent hover:bg-accent/30 font-medium"
+                >
+                  Calculadora
+                </button>
+              </>
+            )}
+            {smartClip.type === "path" && (
+              <>
+                <button
+                  onClick={() => void revealFile(smartClip.raw)}
+                  className="pressable rounded-[6px] bg-fill-3 px-2 py-0.5 text-label hover:bg-fill-4"
+                >
+                  Explorador
+                </button>
+                <button
+                  onClick={() => shelf.set((l) => addText(l, smartClip.raw, Date.now(), crypto.randomUUID()))}
+                  className="pressable rounded-[6px] bg-accent/20 px-2 py-0.5 text-accent hover:bg-accent/30 font-medium"
+                >
+                  + Shelf
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => setSmartClip(null)}
+              className="pressable p-0.5 text-label-4 hover:text-label-2"
+            >
+              <X size={12} weight="bold" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div role="listbox" aria-multiselectable="true" aria-label={t("Ablage")} className="flex min-h-0 flex-1 gap-2 overflow-x-auto [scrollbar-width:none]">
         <AnimatePresence initial={false} mode="popLayout">
           {items.map((item) => {

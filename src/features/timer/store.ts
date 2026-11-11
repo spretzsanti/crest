@@ -18,6 +18,12 @@ interface TimerState {
   finished: boolean;
   /** Last custom duration per mode (seconds), shown as its own chip. */
   custom?: Partial<Record<TimerMode, number>>;
+  /** Academic Pomodoro: task linked from Google Tasks */
+  linkedTask?: {
+    id: string;
+    projectId: string;
+    title: string;
+  } | null;
 }
 
 /** Limits for custom times (minutes). */
@@ -84,6 +90,18 @@ export const timerActions = {
       const custom = presets[s.mode].includes(duration) ? s.custom : { ...s.custom, [s.mode]: duration };
       return { ...s, duration, remaining: duration, endsAt: null, finished: false, custom };
     });
+  },
+  setLinkedTask(linkedTask: { id: string; projectId: string; title: string } | null) {
+    timer.set((s) => ({ ...s, linkedTask }));
+  },
+  completeLinkedTask() {
+    const s = timer.get();
+    if (s.linkedTask) {
+      import("../todos/store").then(({ todoActions }) => {
+        todoActions.done(s.linkedTask!.id);
+      });
+      timer.set((prev) => ({ ...prev, linkedTask: null }));
+    }
   },
 };
 
